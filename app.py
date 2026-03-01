@@ -11,7 +11,7 @@ from datetime import datetime
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 st.set_page_config(
     page_title="Full Turn Analytics | Portfolio Dashboard",
-    page_icon="◼",
+    page_icon="https://em-content.zobj.net/source/apple/391/chart-increasing_1f4c8.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -100,6 +100,20 @@ st.markdown("""
     /* Tabs */
     .stTabs [data-baseweb="tab"] { font-weight: 600; font-size: 14px; }
     .stTabs [aria-selected="true"] { border-bottom-color: #2563eb !important; }
+
+    /* Footer */
+    .dashboard-footer {
+        margin-top: 60px; padding: 20px 0; border-top: 1px solid #e2e8f0;
+        text-align: center; font-size: 11px; color: #94a3b8; letter-spacing: 0.3px;
+    }
+
+    /* Sidebar active view accent */
+    [data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"] {
+        background: rgba(37,99,235,0.15) !important; border-radius: 6px;
+    }
+
+    /* Divider */
+    .section-divider { height: 1px; background: #e2e8f0; margin: 32px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -125,6 +139,19 @@ def pct(val):
     if pd.isna(val):
         return "—"
     return f"{val:+.1f}%"
+
+def divider():
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+
+def footer():
+    st.markdown(
+        '<div class="dashboard-footer">'
+        'CONFIDENTIAL — Full Turn Analytics Dashboard &nbsp;|&nbsp; '
+        f'Data as of Feb 2026 &nbsp;|&nbsp; '
+        'Prepared for Executive Review'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -212,7 +239,7 @@ def build_turn_summary(source_df):
 # SIDEBAR
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 st.sidebar.markdown("### FULL TURN ANALYTICS")
-st.sidebar.caption("Filtered to Full Renovations only")
+st.sidebar.caption("Portfolio Renovation Intelligence Platform")
 st.sidebar.markdown("---")
 
 view = st.sidebar.radio("View", [
@@ -222,6 +249,7 @@ view = st.sidebar.radio("View", [
     "4 — Recent 10 Audit",
     "5 — Unit Search",
     "6 — Anomaly Detection",
+    "7 — CEO Dashboard",
 ])
 
 st.sidebar.markdown("---")
@@ -250,8 +278,8 @@ if view == "1 — Property Level":
     dur = p_turns["Duration"].dropna()
     c5.metric("Median Duration", f"{dur.median():.0f} days" if len(dur) else "—")
 
-    # ── YoY Count 2021-2025 ──
-    section("Year-over-Year Full Turn Count (2021 – 2025)")
+    # ── YoY Count ──
+    section("Year-over-Year Full Turn Count (2016 – 2025)")
 
     yoy = p_turns[p_turns["Year"].isin(YEARS)].groupby("Year").size().reindex(YEARS, fill_value=0)
     yoy_df = pd.DataFrame({"Year": YEARS, "Full Turns": yoy.values})
@@ -325,6 +353,19 @@ if view == "1 — Property Level":
             d["Invoice Amount"] = d["Invoice Amount"].apply(lambda x: fmt(x, 2))
             d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
             st.dataframe(d, use_container_width=True, hide_index=True)
+
+    # Property narrative
+    total_spend = p_turns["total_cost"].sum()
+    avg_cost = p_turns["total_cost"].mean()
+    port_avg_all = ft_turns["total_cost"].mean()
+    vs_port = ((avg_cost - port_avg_all) / port_avg_all * 100) if port_avg_all > 0 else 0
+    insight(
+        f"<strong>{prop}</strong> has completed <strong>{len(p_turns):,}</strong> Full Turns "
+        f"totaling <strong>{fmt(total_spend)}</strong>. "
+        f"Average cost per turn is <strong>{fmt(avg_cost)}</strong>, which is "
+        f"<strong>{pct(vs_port)}</strong> vs the portfolio average of <strong>{fmt(port_avg_all)}</strong>."
+    )
+    footer()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -436,6 +477,8 @@ elif view == "2 — Portfolio Summary":
     else:
         st.info("No 2025 data available.")
 
+    footer()
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 3: 5-YEAR LINE-ITEM TREND
@@ -494,9 +537,6 @@ elif view == "3 — 5-Year Category Trend":
     st.dataframe(pivot_display, use_container_width=True)
 
     # ── Outlier Detection: 1.5 SD ──
-    section("Outlier Detection — Category Spend Exceeding Property Mean by >1.5 Std Dev")
-    st.caption("Flags individual Full Turns where a tracked category's spend exceeds that property's historical mean + 1.5σ for that category.")
-
     # Compute per-property, per-category stats
     prop_cat = (
         ft_5yr_tracked.groupby(["Property Name", "Tracked Category", "Turn Key"])["Invoice Amount"]
@@ -515,42 +555,131 @@ elif view == "3 — 5-Year Category Trend":
         & (flagged["count"] >= 3)  # need min data to compute meaningful SD
     ].copy()
     flagged["Excess"] = flagged["Invoice Amount"] - flagged["mean"]
+    flagged["Excess %"] = (flagged["Excess"] / flagged["mean"] * 100)
     flagged["SDs Over"] = (flagged["Invoice Amount"] - flagged["mean"]) / flagged["std"]
-    flagged = flagged.sort_values("SDs Over", ascending=False)
 
     # Enrich with turn info
     turn_info = ft_turns[["Turn Key", "Property Name", "Unit Label", "Move-Out Date"]].drop_duplicates("Turn Key")
     flagged = flagged.merge(turn_info, on=["Turn Key", "Property Name"], how="left")
 
-    st.metric("Outlier Line Items Flagged", len(flagged))
+    # ── Section A: Last 12 Months Outliers ──
+    section("Outliers — Last 12 Months")
+    st.caption("Category spend exceeding property mean + 1.5σ on Full Turns completed in the past 12 months.")
 
-    if len(flagged) > 0:
-        flag_display = flagged[[
+    cutoff_12m = pd.Timestamp.now() - pd.DateOffset(months=12)
+    recent_outliers = flagged[flagged["Move-Out Date"] >= cutoff_12m].sort_values("Excess", ascending=False).copy()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Outliers (Last 12 Mo)", len(recent_outliers))
+    c2.metric("Total Excess Spend", fmt(recent_outliers["Excess"].sum()) if len(recent_outliers) else "—")
+    top_cat_recent = recent_outliers.groupby("Tracked Category")["Excess"].sum().idxmax() if len(recent_outliers) else "—"
+    c3.metric("Top Flagged Category", top_cat_recent)
+
+    if len(recent_outliers) > 0:
+        r_display = recent_outliers[[
             "Property Name", "Unit Label", "Move-Out Date", "Tracked Category",
-            "Invoice Amount", "mean", "threshold", "SDs Over"
+            "Invoice Amount", "mean", "Excess", "Excess %", "SDs Over"
         ]].copy()
-        flag_display["Move-Out Date"] = flag_display["Move-Out Date"].dt.strftime("%b %d, %Y")
-        flag_display["Invoice Amount"] = flag_display["Invoice Amount"].apply(fmt)
-        flag_display["mean"] = flag_display["mean"].apply(fmt)
-        flag_display["threshold"] = flag_display["threshold"].apply(fmt)
-        flag_display["SDs Over"] = flag_display["SDs Over"].apply(lambda x: f"{x:.1f}σ")
-        flag_display.columns = ["Property", "Unit", "Move-Out", "Category",
-                                 "Actual Spend", "Property Avg", "Threshold (μ+1.5σ)", "Std Devs Over"]
-        st.dataframe(flag_display, use_container_width=True, hide_index=True, height=400)
+        r_display["Move-Out Date"] = r_display["Move-Out Date"].dt.strftime("%b %d, %Y")
+        r_display["Invoice Amount"] = r_display["Invoice Amount"].apply(fmt)
+        r_display["mean"] = r_display["mean"].apply(fmt)
+        r_display["Excess"] = r_display["Excess"].apply(fmt)
+        r_display["Excess %"] = r_display["Excess %"].apply(lambda x: f"+{x:.0f}%")
+        r_display["SDs Over"] = r_display["SDs Over"].apply(lambda x: f"{x:.1f}σ")
+        r_display.columns = ["Property", "Unit", "Move-Out", "Category",
+                              "Actual Spend", "Property Avg", "Excess ($)", "Excess (%)", "Std Devs Over"]
+        st.dataframe(r_display, use_container_width=True, hide_index=True, height=min(400, 60 + len(recent_outliers) * 35))
 
-        # Which categories flag most
-        cat_flags = flagged.groupby("Tracked Category").size().reset_index(name="Flags").sort_values("Flags", ascending=False)
-        fig_flags = px.bar(
-            cat_flags, x="Tracked Category", y="Flags", text="Flags",
-            template=CHART_TEMPLATE, color="Tracked Category",
-            color_discrete_map=CAT_COLORS,
+        # Narrative
+        worst = recent_outliers.iloc[0]
+        insight(
+            f"Highest recent outlier: <strong>{worst['Tracked Category']}</strong> at "
+            f"<strong>{worst['Property Name']}</strong> (Unit {worst['Unit Label']}) — "
+            f"spent <strong>{fmt(worst['Invoice Amount'])}</strong> vs property avg of "
+            f"<strong>{fmt(worst['mean'])}</strong>, exceeding by <strong>{fmt(worst['Excess'])}</strong>."
         )
-        fig_flags.update_traces(textposition="outside")
-        fig_flags.update_layout(margin=dict(t=10, b=10), height=300, showlegend=False,
-                                xaxis_title="", yaxis_title="Outlier Count")
-        st.plotly_chart(fig_flags, use_container_width=True)
+    else:
+        st.success("No category outliers detected in the past 12 months.")
+
+    # ── Section B: All-Time Historical Outliers ──
+    section("Historical Outliers — All Time (Highest Excess First)")
+    st.caption("All flagged category overspends across the full dataset, ranked by dollar excess over property average.")
+
+    historical_outliers = flagged.sort_values("Excess", ascending=False).copy()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Historical Outliers", len(historical_outliers))
+    c2.metric("Cumulative Excess", fmt(historical_outliers["Excess"].sum()) if len(historical_outliers) else "—")
+    top_prop = historical_outliers.groupby("Property Name")["Excess"].sum().idxmax() if len(historical_outliers) else "—"
+    c3.metric("Most Flagged Property", top_prop)
+
+    if len(historical_outliers) > 0:
+        h_display = historical_outliers[[
+            "Property Name", "Unit Label", "Move-Out Date", "Tracked Category",
+            "Invoice Amount", "mean", "Excess", "Excess %", "SDs Over"
+        ]].copy()
+        h_display["Move-Out Date"] = h_display["Move-Out Date"].dt.strftime("%b %d, %Y")
+        h_display["Invoice Amount"] = h_display["Invoice Amount"].apply(fmt)
+        h_display["mean"] = h_display["mean"].apply(fmt)
+        h_display["Excess"] = h_display["Excess"].apply(fmt)
+        h_display["Excess %"] = h_display["Excess %"].apply(lambda x: f"+{x:.0f}%")
+        h_display["SDs Over"] = h_display["SDs Over"].apply(lambda x: f"{x:.1f}σ")
+        h_display.columns = ["Property", "Unit", "Move-Out", "Category",
+                              "Actual Spend", "Property Avg", "Excess ($)", "Excess (%)", "Std Devs Over"]
+        st.dataframe(h_display, use_container_width=True, hide_index=True, height=500)
+
+        # Which categories flag most (bar chart)
+        cat_flags = historical_outliers.groupby("Tracked Category").agg(
+            Flags=("Turn Key", "count"),
+            Total_Excess=("Excess", "sum"),
+        ).reset_index().sort_values("Total_Excess", ascending=False)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            fig_flags = px.bar(
+                cat_flags, x="Tracked Category", y="Flags", text="Flags",
+                template=CHART_TEMPLATE, color="Tracked Category",
+                color_discrete_map=CAT_COLORS,
+            )
+            fig_flags.update_traces(textposition="outside")
+            fig_flags.update_layout(margin=dict(t=10, b=10), height=300, showlegend=False,
+                                    xaxis_title="", yaxis_title="Outlier Count",
+                                    title=dict(text="Outlier Frequency by Category", font=dict(size=13)))
+            st.plotly_chart(fig_flags, use_container_width=True)
+
+        with col2:
+            fig_excess = px.bar(
+                cat_flags, x="Tracked Category", y="Total_Excess",
+                text=cat_flags["Total_Excess"].apply(fmt),
+                template=CHART_TEMPLATE, color="Tracked Category",
+                color_discrete_map=CAT_COLORS,
+            )
+            fig_excess.update_traces(textposition="outside")
+            fig_excess.update_layout(margin=dict(t=10, b=10), height=300, showlegend=False,
+                                     xaxis_title="", yaxis_title="Total Excess ($)",
+                                     title=dict(text="Cumulative Excess by Category", font=dict(size=13)))
+            st.plotly_chart(fig_excess, use_container_width=True)
+
+        # Property breakdown
+        prop_flags = historical_outliers.groupby("Property Name").agg(
+            Flags=("Turn Key", "count"),
+            Excess=("Excess", "sum"),
+        ).reset_index().sort_values("Excess", ascending=False)
+        fig_prop = px.bar(
+            prop_flags, x="Excess", y="Property Name", orientation="h",
+            text=prop_flags["Excess"].apply(fmt),
+            template=CHART_TEMPLATE, color_discrete_sequence=["#dc2626"],
+        )
+        fig_prop.update_traces(textposition="outside")
+        fig_prop.update_layout(margin=dict(t=10, b=10, r=80), height=400, showlegend=False,
+                                xaxis_title="Total Excess Spend ($)", yaxis_title="",
+                                yaxis=dict(autorange="reversed"),
+                                title=dict(text="Excess Spend by Property", font=dict(size=13)))
+        st.plotly_chart(fig_prop, use_container_width=True)
     else:
         st.success("No outliers detected across tracked categories.")
+
+    footer()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -677,6 +806,8 @@ elif view == "4 — Recent 10 Audit":
                 raw = raw.sort_values("Invoice Date")
                 st.dataframe(raw, use_container_width=True, hide_index=True)
 
+    footer()
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 5: UNIT SEARCH
@@ -740,6 +871,8 @@ elif view == "5 — Unit Search":
         )
         fig.update_layout(margin=dict(t=10, b=10), height=350)
         st.plotly_chart(fig, use_container_width=True)
+
+    footer()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -827,3 +960,347 @@ elif view == "6 — Anomaly Detection":
                                "Invoice Amount", "Budget Category", "Line Item Notes"]].head(20).copy()
             neg_d["Invoice Amount"] = neg_d["Invoice Amount"].apply(lambda x: fmt(x, 2))
             st.dataframe(neg_d, use_container_width=True, hide_index=True)
+
+    footer()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# VIEW 7: CEO DASHBOARD
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+elif view == "7 — CEO Dashboard":
+    banner("Executive Intelligence", "Strategic performance overview for senior leadership — Full Turn portfolio analytics")
+
+    # ── Compute core metrics ──
+    recent_3yr = ft_turns[ft_turns["Year"].isin([2023, 2024, 2025])].copy()
+    curr_year = ft_turns[ft_turns["Year"] == 2025]
+    prev_year = ft_turns[ft_turns["Year"] == 2024]
+
+    portfolio_avg = ft_turns["total_cost"].mean()
+    curr_avg = curr_year["total_cost"].mean() if len(curr_year) else 0
+    prev_avg = prev_year["total_cost"].mean() if len(prev_year) else 0
+    yoy_delta = ((curr_avg - prev_avg) / prev_avg * 100) if prev_avg > 0 else np.nan
+
+    curr_vol = len(curr_year)
+    prev_vol = len(prev_year)
+    vol_delta = ((curr_vol - prev_vol) / prev_vol * 100) if prev_vol > 0 else np.nan
+
+    dur_curr = curr_year["Duration"].dropna()
+    dur_prev = prev_year["Duration"].dropna()
+    dur_now = dur_curr.median() if len(dur_curr) else np.nan
+    dur_then = dur_prev.median() if len(dur_prev) else np.nan
+
+    # ── Top-Line KPIs ──
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("2025 Full Turns", f"{curr_vol:,}", f"{vol_delta:+.0f}% vs '24" if pd.notna(vol_delta) else "—")
+    c2.metric("2025 Avg Cost", fmt(curr_avg), pct(yoy_delta) + " vs '24" if pd.notna(yoy_delta) else "—")
+    c3.metric("Portfolio Avg (All)", fmt(portfolio_avg))
+    c4.metric("2025 Total Spend", fmt(curr_year["total_cost"].sum()))
+    c5.metric("Median Duration", f"{dur_now:.0f}d" if pd.notna(dur_now) else "—",
+              f"{dur_now - dur_then:+.0f}d vs '24" if (pd.notna(dur_now) and pd.notna(dur_then)) else "")
+    c6.metric("Active Properties", f"{curr_year['Property ID'].nunique()}" if len(curr_year) else "0")
+
+    # ━━ Section 1: Cost Trajectory ━━
+    section("Cost Trajectory — Are We Getting More Efficient?")
+
+    yearly_stats = ft_turns[ft_turns["Year"].isin(YEARS)].groupby("Year").agg(
+        avg_cost=("total_cost", "mean"),
+        median_cost=("total_cost", "median"),
+        total_spend=("total_cost", "sum"),
+        turn_count=("Turn Key", "count"),
+    ).reset_index()
+
+    col1, col2 = st.columns([3, 2])
+    with col1:
+        fig_traj = go.Figure()
+        fig_traj.add_trace(go.Scatter(
+            x=yearly_stats["Year"], y=yearly_stats["avg_cost"],
+            name="Avg Cost", mode="lines+markers",
+            line=dict(color="#2563eb", width=3), marker=dict(size=9),
+            hovertemplate="Avg: $%{y:,.0f}<extra></extra>",
+        ))
+        fig_traj.add_trace(go.Scatter(
+            x=yearly_stats["Year"], y=yearly_stats["median_cost"],
+            name="Median Cost", mode="lines+markers",
+            line=dict(color="#10b981", width=2, dash="dash"), marker=dict(size=7),
+            hovertemplate="Median: $%{y:,.0f}<extra></extra>",
+        ))
+        fig_traj.update_layout(
+            template=CHART_TEMPLATE,
+            xaxis=dict(dtick=1, title=""), yaxis=dict(title="Cost per Full Turn ($)"),
+            legend=dict(orientation="h", y=-0.12), margin=dict(t=10, b=50), height=380,
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig_traj, use_container_width=True)
+
+    with col2:
+        # Year-over-year change table
+        yearly_stats["YoY Change"] = yearly_stats["avg_cost"].pct_change() * 100
+        ys_display = yearly_stats[["Year", "turn_count", "avg_cost", "median_cost", "total_spend", "YoY Change"]].copy()
+        ys_display["avg_cost"] = ys_display["avg_cost"].apply(fmt)
+        ys_display["median_cost"] = ys_display["median_cost"].apply(fmt)
+        ys_display["total_spend"] = ys_display["total_spend"].apply(fmt)
+        ys_display["YoY Change"] = ys_display["YoY Change"].apply(lambda x: pct(x) if pd.notna(x) else "—")
+        ys_display["Year"] = ys_display["Year"].astype(int).astype(str)
+        ys_display.columns = ["Year", "Turns", "Avg Cost", "Median", "Total Spend", "YoY Δ"]
+        st.dataframe(ys_display, use_container_width=True, hide_index=True, height=380)
+
+    # Cost efficiency narrative
+    if len(yearly_stats) >= 2:
+        first_yr = yearly_stats.iloc[0]
+        last_yr = yearly_stats.iloc[-1]
+        total_chg = ((last_yr["avg_cost"] - first_yr["avg_cost"]) / first_yr["avg_cost"]) * 100 if first_yr["avg_cost"] > 0 else 0
+        insight(
+            f"From <strong>{int(first_yr['Year'])}</strong> to <strong>{int(last_yr['Year'])}</strong>, "
+            f"average Full Turn cost moved from <strong>{fmt(first_yr['avg_cost'])}</strong> to "
+            f"<strong>{fmt(last_yr['avg_cost'])}</strong> — a cumulative shift of <strong>{pct(total_chg)}</strong>. "
+            f"Total capital deployed: <strong>{fmt(ft_turns['total_cost'].sum())}</strong> across "
+            f"<strong>{len(ft_turns):,}</strong> Full Turns."
+        )
+
+    # ━━ Section 2: Property Benchmarking ━━
+    section("Property Benchmarking — Cost Efficiency Ranking")
+
+    prop_bench = ft_turns[ft_turns["Year"].isin(YEARS)].groupby("Property Name").agg(
+        turns=("Turn Key", "count"),
+        avg_cost=("total_cost", "mean"),
+        median_cost=("total_cost", "median"),
+        total_spend=("total_cost", "sum"),
+        avg_duration=("Duration", "median"),
+    ).reset_index().sort_values("avg_cost", ascending=False)
+
+    # Add rank
+    prop_bench["Rank"] = range(1, len(prop_bench) + 1)
+    prop_bench["vs Portfolio"] = ((prop_bench["avg_cost"] - portfolio_avg) / portfolio_avg * 100)
+
+    col1, col2 = st.columns([3, 2])
+    with col1:
+        fig_bench = px.bar(
+            prop_bench.sort_values("avg_cost", ascending=True),
+            y="Property Name", x="avg_cost", orientation="h",
+            text=prop_bench.sort_values("avg_cost", ascending=True)["avg_cost"].apply(fmt),
+            template=CHART_TEMPLATE,
+            color="avg_cost",
+            color_continuous_scale=["#10b981", "#f59e0b", "#dc2626"],
+        )
+        fig_bench.update_traces(textposition="outside")
+        fig_bench.add_vline(x=portfolio_avg, line_dash="dash", line_color="#2563eb",
+                            annotation_text=f"Portfolio Avg: {fmt(portfolio_avg)}",
+                            annotation_position="top right", annotation_font_size=11)
+        fig_bench.update_layout(
+            margin=dict(t=20, b=10, l=10, r=100), height=480,
+            xaxis_title="Avg Full Turn Cost ($)", yaxis_title="",
+            coloraxis_showscale=False,
+        )
+        st.plotly_chart(fig_bench, use_container_width=True)
+
+    with col2:
+        pb_display = prop_bench[["Rank", "Property Name", "turns", "avg_cost", "vs Portfolio", "avg_duration"]].copy()
+        pb_display["avg_cost"] = pb_display["avg_cost"].apply(fmt)
+        pb_display["vs Portfolio"] = pb_display["vs Portfolio"].apply(lambda x: pct(x))
+        pb_display["avg_duration"] = pb_display["avg_duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
+        pb_display.columns = ["#", "Property", "Turns", "Avg Cost", "vs Portfolio", "Med Duration"]
+        st.dataframe(pb_display, use_container_width=True, hide_index=True, height=480)
+
+    # Identify best and worst performers
+    best = prop_bench.sort_values("avg_cost").iloc[0]
+    worst = prop_bench.sort_values("avg_cost").iloc[-1]
+    insight(
+        f"<strong>{worst['Property Name']}</strong> has the highest average Full Turn cost at "
+        f"<strong>{fmt(worst['avg_cost'])}</strong> ({pct(worst['vs Portfolio'])} above portfolio avg), "
+        f"while <strong>{best['Property Name']}</strong> runs most efficiently at "
+        f"<strong>{fmt(best['avg_cost'])}</strong>. Investigating what drives this gap could yield significant savings."
+    )
+
+    # ━━ Section 3: Vendor Concentration ━━
+    section("Vendor Concentration — Risk & Spend Distribution")
+
+    vendor_data = ft_lines[ft_lines["Year"].isin(YEARS)].groupby("Vendor Name").agg(
+        total_spend=("Invoice Amount", "sum"),
+        invoices=("Invoice Amount", "count"),
+        properties=("Property Name", "nunique"),
+        avg_invoice=("Invoice Amount", "mean"),
+    ).reset_index().sort_values("total_spend", ascending=False)
+
+    vendor_data["Share"] = vendor_data["total_spend"] / vendor_data["total_spend"].sum() * 100
+    vendor_data["Cumulative"] = vendor_data["Share"].cumsum()
+
+    top_n = 10
+    top_vendors = vendor_data.head(top_n)
+    top_share = top_vendors["Share"].sum()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Vendors", f"{len(vendor_data):,}")
+    c2.metric(f"Top {top_n} Share", f"{top_share:.1f}%")
+    c3.metric("Single-Property Vendors", f"{len(vendor_data[vendor_data['properties'] == 1]):,}")
+
+    col1, col2 = st.columns([3, 2])
+    with col1:
+        fig_vendor = px.bar(
+            top_vendors, y="Vendor Name", x="total_spend", orientation="h",
+            text=top_vendors["total_spend"].apply(fmt),
+            template=CHART_TEMPLATE, color_discrete_sequence=["#6366f1"],
+        )
+        fig_vendor.update_traces(textposition="outside")
+        fig_vendor.update_layout(
+            margin=dict(t=10, b=10, l=10, r=100), height=400,
+            xaxis_title="Total Spend ($)", yaxis_title="",
+            yaxis=dict(autorange="reversed"),
+        )
+        st.plotly_chart(fig_vendor, use_container_width=True)
+
+    with col2:
+        v_display = top_vendors[["Vendor Name", "total_spend", "Share", "invoices", "properties"]].copy()
+        v_display["total_spend"] = v_display["total_spend"].apply(fmt)
+        v_display["Share"] = v_display["Share"].apply(lambda x: f"{x:.1f}%")
+        v_display.columns = ["Vendor", "Total Spend", "Portfolio %", "Invoices", "Properties"]
+        st.dataframe(v_display, use_container_width=True, hide_index=True, height=400)
+
+    if top_share > 60:
+        st.markdown(f'<div class="outlier-flag"><strong>Concentration Risk:</strong> Top {top_n} vendors control '
+                    f'<strong>{top_share:.1f}%</strong> of spend. Consider diversifying to reduce dependency and '
+                    f'improve pricing leverage.</div>', unsafe_allow_html=True)
+
+    # ━━ Section 4: Capital Forecast ━━
+    section("Capital Forecast — Projected Annual Full Turn Spend")
+
+    # Use 3-year trailing average for projection
+    hist_years = [2023, 2024, 2025]
+    hist_data = ft_turns[ft_turns["Year"].isin(hist_years)].groupby("Year").agg(
+        turns=("Turn Key", "count"),
+        total=("total_cost", "sum"),
+        avg_cost=("total_cost", "mean"),
+    ).reset_index()
+
+    if len(hist_data) >= 2:
+        avg_turns = hist_data["turns"].mean()
+        avg_cost_trend = hist_data["avg_cost"].mean()
+        projected_spend = avg_turns * avg_cost_trend
+
+        # Cost trend (linear)
+        if len(hist_data) >= 2:
+            cost_slope = np.polyfit(hist_data["Year"], hist_data["avg_cost"], 1)
+            projected_cost_2026 = np.polyval(cost_slope, 2026)
+            projected_cost_2026 = max(projected_cost_2026, 0)
+
+            vol_slope = np.polyfit(hist_data["Year"], hist_data["turns"], 1)
+            projected_vol_2026 = max(np.polyval(vol_slope, 2026), 0)
+
+            forecast_spend = projected_vol_2026 * projected_cost_2026
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("3-Year Avg Turns/Year", f"{avg_turns:.0f}")
+        c2.metric("3-Year Avg Cost", fmt(avg_cost_trend))
+        c3.metric("2026 Proj. Avg Cost", fmt(projected_cost_2026))
+        c4.metric("2026 Proj. Spend", fmt(forecast_spend))
+
+        # Forecast chart
+        all_years_data = ft_turns[ft_turns["Year"].isin(YEARS)].groupby("Year").agg(
+            total=("total_cost", "sum"),
+        ).reset_index()
+
+        fig_fc = go.Figure()
+        fig_fc.add_trace(go.Bar(
+            x=all_years_data["Year"], y=all_years_data["total"],
+            name="Actual", marker_color="#2563eb",
+            hovertemplate="Actual: $%{y:,.0f}<extra></extra>",
+        ))
+        fig_fc.add_trace(go.Bar(
+            x=[2026], y=[forecast_spend],
+            name="Projected", marker_color="#94a3b8", opacity=0.6,
+            hovertemplate="Projected: $%{y:,.0f}<extra></extra>",
+        ))
+        fig_fc.update_layout(
+            template=CHART_TEMPLATE, barmode="group",
+            xaxis=dict(dtick=1, title=""), yaxis=dict(title="Annual Full Turn Spend ($)"),
+            legend=dict(orientation="h", y=-0.12), margin=dict(t=10, b=50), height=380,
+        )
+        st.plotly_chart(fig_fc, use_container_width=True)
+
+        insight(
+            f"Based on 2023–2025 trends, the portfolio is projected to complete approximately "
+            f"<strong>{projected_vol_2026:.0f}</strong> Full Turns in 2026 at an average cost of "
+            f"<strong>{fmt(projected_cost_2026)}</strong>, totaling an estimated "
+            f"<strong>{fmt(forecast_spend)}</strong> in capital deployment."
+        )
+
+    # ━━ Section 5: Key Risk Flags ━━
+    section("Risk Flags — Items Requiring Executive Attention")
+
+    risk_items = []
+
+    # 1. Properties with rising costs (2024 → 2025)
+    for prop in PROPERTIES:
+        p24 = ft_turns[(ft_turns["Property Name"] == prop) & (ft_turns["Year"] == 2024)]["total_cost"]
+        p25 = ft_turns[(ft_turns["Property Name"] == prop) & (ft_turns["Year"] == 2025)]["total_cost"]
+        if len(p24) >= 2 and len(p25) >= 2:
+            chg = ((p25.mean() - p24.mean()) / p24.mean()) * 100
+            if chg > 20:
+                risk_items.append({
+                    "Risk": "Cost Escalation",
+                    "Detail": f"{prop}: avg cost up {chg:.0f}% YoY ({fmt(p24.mean())} → {fmt(p25.mean())})",
+                    "Severity": "High" if chg > 40 else "Medium",
+                })
+
+    # 2. Properties with slow duration
+    for prop in PROPERTIES:
+        p_dur = ft_turns[(ft_turns["Property Name"] == prop) & (ft_turns["Year"] == 2025)]["Duration"].dropna()
+        if len(p_dur) >= 3 and p_dur.median() > 60:
+            risk_items.append({
+                "Risk": "Slow Velocity",
+                "Detail": f"{prop}: median turn duration {p_dur.median():.0f} days (>60d threshold)",
+                "Severity": "Medium",
+            })
+
+    # 3. Category inflation
+    for cat_name, raw_cats in CATEGORY_MAP.items():
+        cat24 = ft_lines[(ft_lines["Year"] == 2024) & (ft_lines["Budget Category"].isin(raw_cats))]["Invoice Amount"]
+        cat25 = ft_lines[(ft_lines["Year"] == 2025) & (ft_lines["Budget Category"].isin(raw_cats))]["Invoice Amount"]
+        if len(cat24) >= 5 and len(cat25) >= 5:
+            chg = ((cat25.mean() - cat24.mean()) / cat24.mean()) * 100
+            if chg > 25:
+                risk_items.append({
+                    "Risk": "Category Inflation",
+                    "Detail": f"{cat_name}: avg invoice up {chg:.0f}% YoY ({fmt(cat24.mean())} → {fmt(cat25.mean())})",
+                    "Severity": "High" if chg > 50 else "Medium",
+                })
+
+    # 4. High-frequency units (>4 turns all-time)
+    all_turns_count = build_turn_summary(_df_all)
+    freq_units = all_turns_count.groupby(["Property Name", "Unit Label"]).size().reset_index(name="turns")
+    chronic = freq_units[freq_units["turns"] >= 5]
+    if len(chronic) > 0:
+        risk_items.append({
+            "Risk": "Chronic Vacancy",
+            "Detail": f"{len(chronic)} units with 5+ turns — potential workmanship or tenant screening issues",
+            "Severity": "Medium",
+        })
+
+    if risk_items:
+        risk_df = pd.DataFrame(risk_items)
+        # Sort: High first
+        severity_order = {"High": 0, "Medium": 1, "Low": 2}
+        risk_df["_sort"] = risk_df["Severity"].map(severity_order)
+        risk_df = risk_df.sort_values("_sort").drop("_sort", axis=1)
+
+        for _, r in risk_df.iterrows():
+            color = "#dc2626" if r["Severity"] == "High" else "#f59e0b"
+            icon = "🔴" if r["Severity"] == "High" else "🟡"
+            st.markdown(
+                f'<div style="background: {"#fef2f2" if r["Severity"] == "High" else "#fffbeb"}; '
+                f'border: 1px solid {"#fecaca" if r["Severity"] == "High" else "#fde68a"}; '
+                f'border-left: 4px solid {color}; border-radius: 8px; padding: 12px 16px; margin: 6px 0; font-size: 13px;">'
+                f'<strong>{icon} {r["Risk"]}</strong> — {r["Detail"]}</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("")  # spacer
+        insight(
+            f"<strong>{len([r for r in risk_items if r['Severity'] == 'High'])}</strong> high-severity and "
+            f"<strong>{len([r for r in risk_items if r['Severity'] == 'Medium'])}</strong> medium-severity risk "
+            f"flags identified. Cost escalation items should be investigated first — they represent the most "
+            f"immediate impact to capital deployment efficiency."
+        )
+    else:
+        st.success("No risk flags identified — portfolio metrics are within normal ranges.")
+
+    footer()
