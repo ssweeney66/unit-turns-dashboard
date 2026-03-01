@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
+from openai import OpenAI
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIG
@@ -257,11 +258,12 @@ st.sidebar.markdown("---")
 view = st.sidebar.radio("View", [
     "1 — Executive Summary",
     "2 — Portfolio Overview",
-    "3 — Category Trends",
-    "4 — Property Drilldown",
+    "3 — Property Summary",
+    "4 — Category Trends",
     "5 — Recent Turns Audit",
     "6 — Unit Search",
     "7 — Anomaly Detection",
+    "8 — Data Assistant",
 ])
 
 st.sidebar.markdown("---")
@@ -272,10 +274,10 @@ st.sidebar.caption(
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 1: PROPERTY LEVEL
+# VIEW 3: PROPERTY SUMMARY
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-if view == "4 — Property Drilldown":
-    banner("Property-Level Full Turn Analysis", "Select a property to review renovation volume, floor plan mix, and recent completions")
+if view == "3 — Property Summary":
+    banner("Property Summary", "Select a property to review renovation volume, floor plan mix, and recent completions")
 
     prop = st.selectbox("Select Property", PROPERTIES)
     p_turns = ft_turns[ft_turns["Property Name"] == prop].copy()
@@ -493,9 +495,9 @@ elif view == "2 — Portfolio Overview":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 3: CATEGORY TRENDS (Last 5 Years)
+# VIEW 4: CATEGORY TRENDS (Last 5 Years)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "3 — Category Trends":
+elif view == "4 — Category Trends":
     banner("Category Cost Trends", f"5-year trend ({TREND_YEARS[0]}–{TREND_YEARS[-1]}) — Materials and Labor analyzed separately per Full Turn")
 
     ft_trend = ft_lines[ft_lines["Year"].isin(TREND_YEARS)].copy()
@@ -1410,3 +1412,164 @@ elif view == "1 — Executive Summary":
         st.success("No risk flags identified — portfolio metrics are within normal ranges.")
 
     footer()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# VIEW 8: DATA ASSISTANT (AI-Powered Q&A)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+elif view == "8 — Data Assistant":
+    banner("Data Assistant", "Ask questions about your Full Turn portfolio data — powered by AI")
+
+    # ── Build data context for the LLM ──
+    @st.cache_data
+    def build_data_context(_ft_turns, _ft_lines, _df_all):
+        """Generate a compact summary of the portfolio data for the LLM system prompt."""
+        lines = []
+        lines.append("=== PORTFOLIO OVERVIEW ===")
+        lines.append(f"Total Full Turns: {len(_ft_turns):,}")
+        lines.append(f"Properties: {_ft_turns['Property Name'].nunique()}")
+        lines.append(f"Unique Units: {_ft_turns['UID'].nunique()}")
+        lines.append(f"Date Range: {_ft_turns['Move-Out Date'].min().strftime('%b %Y')} to {_ft_turns['Move-Out Date'].max().strftime('%b %Y')}")
+        lines.append(f"Total Spend: ${_ft_turns['total_cost'].sum():,.0f}")
+        lines.append(f"Avg Cost per Turn: ${_ft_turns['total_cost'].mean():,.0f}")
+        lines.append(f"Median Cost per Turn: ${_ft_turns['total_cost'].median():,.0f}")
+        dur = _ft_turns["Duration"].dropna()
+        if len(dur) > 0:
+            lines.append(f"Avg Duration: {dur.mean():.0f} days | Median: {dur.median():.0f} days")
+
+        lines.append("\n=== PROPERTY BREAKDOWN ===")
+        prop_stats = _ft_turns.groupby("Property Name").agg(
+            turns=("Turn Key", "count"),
+            avg_cost=("total_cost", "mean"),
+            total_spend=("total_cost", "sum"),
+        ).sort_values("total_spend", ascending=False)
+        for prop, row in prop_stats.iterrows():
+            lines.append(f"  {prop}: {row['turns']} turns, avg ${row['avg_cost']:,.0f}, total ${row['total_spend']:,.0f}")
+
+        lines.append("\n=== YEARLY TRENDS ===")
+        yearly = _ft_turns.groupby("Year").agg(
+            turns=("Turn Key", "count"),
+            avg_cost=("total_cost", "mean"),
+            total_spend=("total_cost", "sum"),
+        )
+        for yr, row in yearly.iterrows():
+            lines.append(f"  {int(yr)}: {row['turns']} turns, avg ${row['avg_cost']:,.0f}, total ${row['total_spend']:,.0f}")
+
+        lines.append("\n=== TOP BUDGET CATEGORIES (by total spend) ===")
+        cat_spend = _ft_lines.groupby("Budget Category")["Invoice Amount"].agg(["sum", "mean", "count"]).sort_values("sum", ascending=False)
+        for cat, row in cat_spend.head(17).iterrows():
+            lines.append(f"  {cat}: ${row['sum']:,.0f} total, ${row['mean']:,.0f} avg invoice, {int(row['count'])} invoices")
+
+        lines.append("\n=== FLOOR PLAN MIX ===")
+        fp_stats = _ft_turns.groupby("Floor Plan").agg(
+            turns=("Turn Key", "count"),
+            avg_cost=("total_cost", "mean"),
+        ).sort_values("turns", ascending=False)
+        for fp, row in fp_stats.head(10).iterrows():
+            lines.append(f"  {fp}: {row['turns']} turns, avg ${row['avg_cost']:,.0f}")
+
+        lines.append("\n=== VENDOR SUMMARY (Top 15) ===")
+        vendor_stats = _ft_lines.groupby("Vendor Name")["Invoice Amount"].agg(["sum", "count"]).sort_values("sum", ascending=False)
+        for v, row in vendor_stats.head(15).iterrows():
+            lines.append(f"  {v}: ${row['sum']:,.0f} total, {int(row['count'])} invoices")
+
+        return "\n".join(lines)
+
+    data_context = build_data_context(ft_turns, ft_lines, _df_all)
+
+    SYSTEM_PROMPT = f"""You are a senior multifamily real estate analytics assistant embedded in a Full Turn renovation dashboard.
+Your role is to answer questions about this portfolio's renovation (Full Turn) data with precision, clarity, and executive-level insight.
+
+Key definitions:
+- Full Turn: A complete unit renovation after a tenant moves out (avg $15-23K)
+- Turn Key: Unique identifier for each turn event (Property + Unit + Move-Out Date)
+- Duration: Days from move-out to last invoice (renovation timeline)
+- Budget Categories: 17 categories split into Materials (Supplies, Appliances, Flooring Materials, Paint, Cabinets Materials, Countertops Materials, Windows) and Labor (Labor General, Flooring Labor, Electric General, Countertops Labor, Plumbing, Powerwash and Demo, Management Fee, Scrape Ceiling, Glaze, Cabinets Labor)
+
+Here is the current portfolio data summary:
+
+{data_context}
+
+Guidelines:
+- Always cite specific numbers from the data when answering
+- Format currency as $X,XXX
+- If you're unsure or the data doesn't support an answer, say so clearly
+- Provide actionable insights when relevant
+- Keep responses concise but thorough (3-5 sentences for simple questions, more for complex analysis)
+- When comparing properties, always rank them
+- Use percentage changes for YoY comparisons"""
+
+    # ── API Key handling ──
+    api_key = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        placeholder="sk-...",
+        help="Enter your OpenAI API key to enable the Data Assistant. Your key is never stored."
+    )
+
+    if not api_key:
+        st.info("🔑 Enter your OpenAI API key above to start asking questions about your data. "
+                "Your key is used only for this session and is never stored.")
+        st.markdown("**Example questions you can ask:**")
+        st.markdown("""
+        - *Which property has the highest average Full Turn cost?*
+        - *How has our total spend changed year over year?*
+        - *What are the top 3 budget categories by spend?*
+        - *Compare 2024 vs 2025 performance across the portfolio*
+        - *Which properties are getting more expensive over time?*
+        - *What's our average renovation duration?*
+        - *Who are our top vendors and how much do we spend with each?*
+        """)
+        footer()
+    else:
+        client = OpenAI(api_key=api_key)
+
+        # Initialize chat history
+        if "chat_messages" not in st.session_state:
+            st.session_state.chat_messages = []
+
+        # Display chat history
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # Chat input
+        if prompt := st.chat_input("Ask a question about your Full Turn data..."):
+            # Show user message
+            st.session_state.chat_messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            # Build messages for API
+            api_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            # Include last 10 messages for context
+            for msg in st.session_state.chat_messages[-10:]:
+                api_messages.append({"role": msg["role"], "content": msg["content"]})
+
+            # Get AI response
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing your data..."):
+                    try:
+                        response = client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=api_messages,
+                            temperature=0.3,
+                            max_tokens=1000,
+                        )
+                        answer = response.choices[0].message.content
+                        st.markdown(answer)
+                        st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "api_key" in error_msg.lower() or "auth" in error_msg.lower():
+                            st.error("❌ Invalid API key. Please check your OpenAI API key and try again.")
+                        else:
+                            st.error(f"❌ Error: {error_msg}")
+
+        # Clear chat button
+        if st.session_state.chat_messages:
+            if st.button("🗑️ Clear Chat History"):
+                st.session_state.chat_messages = []
+                st.rerun()
+
+        footer()
