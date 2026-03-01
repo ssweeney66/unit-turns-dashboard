@@ -243,13 +243,13 @@ st.sidebar.caption("Portfolio Renovation Intelligence Platform")
 st.sidebar.markdown("---")
 
 view = st.sidebar.radio("View", [
-    "1 — Property Level",
-    "2 — Portfolio Summary",
-    "3 — 5-Year Category Trend",
-    "4 — Recent 10 Audit",
-    "5 — Unit Search",
-    "6 — Anomaly Detection",
-    "7 — CEO Dashboard",
+    "1 — Executive Summary",
+    "2 — Portfolio Overview",
+    "3 — Category Trends",
+    "4 — Property Drilldown",
+    "5 — Recent Turns Audit",
+    "6 — Unit Search",
+    "7 — Anomaly Detection",
 ])
 
 st.sidebar.markdown("---")
@@ -262,7 +262,7 @@ st.sidebar.caption(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 1: PROPERTY LEVEL
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-if view == "1 — Property Level":
+if view == "4 — Property Drilldown":
     banner("Property-Level Full Turn Analysis", "Select a property to review renovation volume, floor plan mix, and recent completions")
 
     prop = st.selectbox("Select Property", PROPERTIES)
@@ -371,7 +371,7 @@ if view == "1 — Property Level":
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 2: PORTFOLIO SUMMARY
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "2 — Portfolio Summary":
+elif view == "2 — Portfolio Overview":
     banner("Portfolio Summary", "Average Full Turn cost per property — 2016 through 2025")
 
     SUMMARY_YEARS = YEARS
@@ -483,7 +483,7 @@ elif view == "2 — Portfolio Summary":
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 3: 5-YEAR LINE-ITEM TREND
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "3 — 5-Year Category Trend":
+elif view == "3 — Category Trends":
     banner("5-Year Category Cost Trend", "Tracking Paint, Labor General, Flooring, Countertops, and Appliances per Full Turn")
 
     ft_5yr = ft_lines[ft_lines["Year"].isin(YEARS)].copy()
@@ -685,7 +685,7 @@ elif view == "3 — 5-Year Category Trend":
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 4: RECENT 10 AUDIT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "4 — Recent 10 Audit":
+elif view == "5 — Recent Turns Audit":
     banner("Recent 10 Full Turn Audit",
            "Detailed cost breakdown of the 10 most recent Full Turns — benchmarked against the portfolio 5-year average")
 
@@ -812,7 +812,7 @@ elif view == "4 — Recent 10 Audit":
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 5: UNIT SEARCH
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "5 — Unit Search":
+elif view == "6 — Unit Search":
     banner("Unit Search & History", "Full renovation history for any unit in the portfolio")
 
     # Use all-types turn summary for this view
@@ -878,7 +878,7 @@ elif view == "5 — Unit Search":
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 6: ANOMALY DETECTION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "6 — Anomaly Detection":
+elif view == "7 — Anomaly Detection":
     banner("Anomaly Detection", "Identify unusual patterns across all turn types requiring investigation")
 
     all_turns = build_turn_summary(_df_all)
@@ -967,7 +967,7 @@ elif view == "6 — Anomaly Detection":
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 7: CEO DASHBOARD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "7 — CEO Dashboard":
+elif view == "1 — Executive Summary":
     banner("Executive Intelligence", "Strategic performance overview for senior leadership — Full Turn portfolio analytics")
 
     # ── Compute core metrics ──
