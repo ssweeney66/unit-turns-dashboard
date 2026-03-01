@@ -55,7 +55,6 @@ LAB_COLORS = {
 }
 
 
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STYLING
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -132,8 +131,6 @@ st.markdown("""
         background: rgba(37,99,235,0.15) !important; border-radius: 6px;
     }
 
-    /* Divider */
-    .section-divider { height: 1px; background: #e2e8f0; margin: 32px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -151,17 +148,16 @@ def insight(text):
     st.markdown(f'<div class="insight-box">{text}</div>', unsafe_allow_html=True)
 
 def fmt(val, decimals=0):
-    if pd.isna(val) or val == 0:
+    if pd.isna(val):
         return "—"
+    if val < 0:
+        return f"-${abs(val):,.{decimals}f}"
     return f"${val:,.{decimals}f}"
 
 def pct(val):
     if pd.isna(val):
         return "—"
     return f"{val:+.1f}%"
-
-def divider():
-    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
 def footer():
     st.markdown(
@@ -263,7 +259,7 @@ view = st.sidebar.radio("View", [
     "5 — Recent Turns Audit",
     "6 — Unit Search",
     "7 — Anomaly Detection",
-    "8 — Data Assistant",
+    "8 — Data Review LLM",
 ])
 
 st.sidebar.markdown("---")
@@ -366,6 +362,7 @@ if view == "3 — Property Summary":
             d = items[["Vendor Name", "Budget Category", "Invoice Amount", "Invoice Date", "Line Item Notes"]].copy()
             d["Invoice Amount"] = d["Invoice Amount"].apply(lambda x: fmt(x, 2))
             d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
+            d["Line Item Notes"] = d["Line Item Notes"].fillna("")
             st.dataframe(d, use_container_width=True, hide_index=True)
 
     # Property narrative
@@ -383,7 +380,7 @@ if view == "3 — Property Summary":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 2: PORTFOLIO SUMMARY
+# VIEW 2: PORTFOLIO OVERVIEW
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "2 — Portfolio Overview":
     banner("Portfolio Summary", "Average Full Turn cost per property — 2016 through 2025")
@@ -526,7 +523,7 @@ elif view == "4 — Category Trends":
     c2.metric("Labor / Turn", fmt(lab_per_turn))
     c3.metric("Materials Share", f"{mat_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—")
     c4.metric("Labor Share", f"{lab_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—")
-    c5.metric("Budget Categories", "17")
+    c5.metric("Budget Categories", f"{len(MATERIALS_CATS) + len(LABOR_CATS)}")
 
     # ══════════════════════════════════════════════════
     # MATERIALS CHART
@@ -789,7 +786,7 @@ elif view == "4 — Category Trends":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 4: RECENT 10 AUDIT
+# VIEW 5: RECENT TURNS AUDIT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "5 — Recent Turns Audit":
     banner("Recent 10 Full Turn Audit",
@@ -797,14 +794,14 @@ elif view == "5 — Recent Turns Audit":
 
     recent_10 = ft_turns.sort_values("completion_date", ascending=False).head(10).copy()
 
-    # Portfolio-wide 5-year avg per category per turn
-    ft_5yr = ft_lines[ft_lines["Year"].isin(YEARS)].copy()
-    total_turns_5yr = ft_turns[ft_turns["Year"].isin(YEARS)]["Turn Key"].nunique()
+    # Portfolio-wide avg per category per turn (all years)
+    ft_audit = ft_lines[ft_lines["Year"].isin(YEARS)].copy()
+    total_turns_audit = ft_turns[ft_turns["Year"].isin(YEARS)]["Turn Key"].nunique()
 
     portfolio_cat_avg = (
-        ft_5yr.groupby("Budget Category")["Invoice Amount"].sum() / total_turns_5yr
+        ft_audit.groupby("Budget Category")["Invoice Amount"].sum() / total_turns_audit
     ).reset_index()
-    portfolio_cat_avg.columns = ["Budget Category", "Portfolio 5yr Avg"]
+    portfolio_cat_avg.columns = ["Budget Category", "Portfolio Avg"]
 
     # Summary table
     section("Overview — 10 Most Recent Full Turns")
@@ -855,18 +852,18 @@ elif view == "5 — Recent Turns Audit":
                 .sort_values("Invoice Amount", ascending=False)
             )
             cat_agg = cat_agg.merge(portfolio_cat_avg, on="Budget Category", how="left")
-            cat_agg["Portfolio 5yr Avg"] = cat_agg["Portfolio 5yr Avg"].fillna(0)
-            cat_agg["Variance"] = cat_agg["Invoice Amount"] - cat_agg["Portfolio 5yr Avg"]
+            cat_agg["Portfolio Avg"] = cat_agg["Portfolio Avg"].fillna(0)
+            cat_agg["Variance"] = cat_agg["Invoice Amount"] - cat_agg["Portfolio Avg"]
             cat_agg["Var %"] = cat_agg.apply(
-                lambda r: ((r["Variance"]) / r["Portfolio 5yr Avg"] * 100)
-                if r["Portfolio 5yr Avg"] > 0 else np.nan, axis=1
+                lambda r: ((r["Variance"]) / r["Portfolio Avg"] * 100)
+                if r["Portfolio Avg"] > 0 else np.nan, axis=1
             )
 
             # Display
             cat_display = cat_agg.copy()
             cat_display["Invoice Amount"] = cat_display["Invoice Amount"].apply(fmt)
-            cat_display["Portfolio 5yr Avg"] = cat_display["Portfolio 5yr Avg"].apply(fmt)
-            cat_display["Variance"] = cat_display["Variance"].apply(lambda x: fmt(x) if x >= 0 else f"-{fmt(abs(x))}")
+            cat_display["Portfolio Avg"] = cat_display["Portfolio Avg"].apply(fmt)
+            cat_display["Variance"] = cat_display["Variance"].apply(fmt)
             cat_display["Var %"] = cat_display["Var %"].apply(lambda x: pct(x) if pd.notna(x) else "—")
             cat_display.columns = ["Category", "This Turn", "Portfolio Avg", "Variance ($)", "Variance (%)"]
             st.dataframe(cat_display, use_container_width=True, hide_index=True)
@@ -882,8 +879,8 @@ elif view == "5 — Recent Turns Audit":
                     marker_color="#2563eb", opacity=0.9,
                 ))
                 fig_cmp.add_trace(go.Bar(
-                    y=top_cats["Budget Category"], x=top_cats["Portfolio 5yr Avg"],
-                    name="Portfolio 5yr Avg", orientation="h",
+                    y=top_cats["Budget Category"], x=top_cats["Portfolio Avg"],
+                    name="Portfolio Avg", orientation="h",
                     marker_color="#94a3b8", opacity=0.6,
                 ))
                 fig_cmp.update_layout(
@@ -910,6 +907,7 @@ elif view == "5 — Recent Turns Audit":
                              "Invoice Date", "Cost Type", "Line Item Notes"]].copy()
                 raw["Invoice Amount"] = raw["Invoice Amount"].apply(lambda x: fmt(x, 2))
                 raw["Invoice Date"] = raw["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
+                raw["Line Item Notes"] = raw["Line Item Notes"].fillna("")
                 raw = raw.sort_values("Invoice Date")
                 st.dataframe(raw, use_container_width=True, hide_index=True)
 
@@ -917,7 +915,7 @@ elif view == "5 — Recent Turns Audit":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 5: UNIT SEARCH
+# VIEW 6: UNIT SEARCH
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "6 — Unit Search":
     banner("Unit Search & History", "Full renovation history for any unit in the portfolio")
@@ -944,10 +942,12 @@ elif view == "6 — Unit Search":
         st.info("No turn history found for this unit.")
     else:
         sample = unit_df.iloc[0]
+        bed = f"{sample['Bedrooms']:.0f}" if pd.notna(sample['Bedrooms']) else "—"
+        bath = f"{sample['Bathrooms']:.0f}" if pd.notna(sample['Bathrooms']) else "—"
         st.markdown(
             f"**{prop_choice} — Unit {unit_choice}** &nbsp;|&nbsp; "
             f"Floor Plan: `{sample['Floor Plan']}` &nbsp;|&nbsp; "
-            f"Bed/Bath: `{sample['Bedrooms']:.0f} / {sample['Bathrooms']:.0f}` &nbsp;|&nbsp; "
+            f"Bed/Bath: `{bed} / {bath}` &nbsp;|&nbsp; "
             f"ID: `{sample['UID']}`"
         )
 
@@ -967,6 +967,7 @@ elif view == "6 — Unit Search":
                               "Cost Type", "Invoice Amount", "Line Item Notes"]].copy()
                 disp["Invoice Date"] = disp["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
                 disp["Invoice Amount"] = disp["Invoice Amount"].apply(lambda x: fmt(x, 2))
+                disp["Line Item Notes"] = disp["Line Item Notes"].fillna("")
                 st.dataframe(disp, use_container_width=True, hide_index=True)
 
         section("Spending History")
@@ -983,7 +984,7 @@ elif view == "6 — Unit Search":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 6: ANOMALY DETECTION
+# VIEW 7: ANOMALY DETECTION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "7 — Anomaly Detection":
     banner("Anomaly Detection", "Identify unusual patterns across all turn types requiring investigation")
@@ -1035,7 +1036,7 @@ elif view == "7 — Anomaly Detection":
             for _, row in all_turns[(all_turns["Turn Type"] == tt) & (all_turns["total_cost"] > upper)].iterrows():
                 outlier_rows.append({
                     "Property": row["Property Name"], "Unit": row["Unit Label"],
-                    "Move-Out": row["Move-Out Date"].strftime("%b %d, %Y"),
+                    "Move-Out": row["Move-Out Date"].strftime("%b %d, %Y") if pd.notna(row["Move-Out Date"]) else "—",
                     "Type": row["Turn Type"],
                     "Cost": row["total_cost"], "Threshold": upper,
                 })
@@ -1054,7 +1055,7 @@ elif view == "7 — Anomaly Detection":
         st.caption("Data integrity checks across all records.")
         negatives = _df_all[_df_all["Invoice Amount"] < 0]
         missing_unit = _df_all[_df_all["Unit Number"].str.strip() == ""]
-        missing_inv = _df_all[_df_all["Invoice Number"].isna() | (_df_all["Invoice Number"].astype(str).str.strip() == "")]
+        missing_inv = _df_all[_df_all["Invoice Number"].isna() | (_df_all["Invoice Number"].astype(str).str.strip() == "")] if "Invoice Number" in _df_all.columns else pd.DataFrame()
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Negative Invoices", len(negatives))
@@ -1066,13 +1067,14 @@ elif view == "7 — Anomaly Detection":
             neg_d = negatives[["Property Name", "Unit Label", "Vendor Name",
                                "Invoice Amount", "Budget Category", "Line Item Notes"]].head(20).copy()
             neg_d["Invoice Amount"] = neg_d["Invoice Amount"].apply(lambda x: fmt(x, 2))
+            neg_d["Line Item Notes"] = neg_d["Line Item Notes"].fillna("")
             st.dataframe(neg_d, use_container_width=True, hide_index=True)
 
     footer()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 7: CEO DASHBOARD
+# VIEW 1: EXECUTIVE SUMMARY
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "1 — Executive Summary":
     banner("Executive Intelligence", "Strategic performance overview for senior leadership — Full Turn portfolio analytics")
@@ -1099,7 +1101,7 @@ elif view == "1 — Executive Summary":
     # ── Top-Line KPIs ──
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("2025 Full Turns", f"{curr_vol:,}", f"{vol_delta:+.0f}% vs '24" if pd.notna(vol_delta) else "—")
-    c2.metric("2025 Avg Cost", fmt(curr_avg), pct(yoy_delta) + " vs '24" if pd.notna(yoy_delta) else "—")
+    c2.metric("2025 Avg Cost", fmt(curr_avg), (pct(yoy_delta) + " vs '24") if pd.notna(yoy_delta) else "—")
     c3.metric("Portfolio Avg (All)", fmt(portfolio_avg))
     c4.metric("2025 Total Spend", fmt(curr_year["total_cost"].sum()))
     c5.metric("Median Duration", f"{dur_now:.0f}d" if pd.notna(dur_now) else "—",
@@ -1415,10 +1417,10 @@ elif view == "1 — Executive Summary":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 8: DATA ASSISTANT (AI-Powered Q&A)
+# VIEW 8: DATA REVIEW LLM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "8 — Data Assistant":
-    banner("Data Assistant", "Ask questions about your Full Turn portfolio data — powered by AI")
+elif view == "8 — Data Review LLM":
+    banner("Data Review LLM", "Ask questions about your Full Turn portfolio data — powered by AI")
 
     # ── Build data context for the LLM ──
     @st.cache_data
@@ -1429,7 +1431,10 @@ elif view == "8 — Data Assistant":
         lines.append(f"Total Full Turns: {len(_ft_turns):,}")
         lines.append(f"Properties: {_ft_turns['Property Name'].nunique()}")
         lines.append(f"Unique Units: {_ft_turns['UID'].nunique()}")
-        lines.append(f"Date Range: {_ft_turns['Move-Out Date'].min().strftime('%b %Y')} to {_ft_turns['Move-Out Date'].max().strftime('%b %Y')}")
+        min_date = _ft_turns['Move-Out Date'].min()
+        max_date = _ft_turns['Move-Out Date'].max()
+        if pd.notna(min_date) and pd.notna(max_date):
+            lines.append(f"Date Range: {min_date.strftime('%b %Y')} to {max_date.strftime('%b %Y')}")
         lines.append(f"Total Spend: ${_ft_turns['total_cost'].sum():,.0f}")
         lines.append(f"Avg Cost per Turn: ${_ft_turns['total_cost'].mean():,.0f}")
         lines.append(f"Median Cost per Turn: ${_ft_turns['total_cost'].median():,.0f}")
@@ -1504,7 +1509,7 @@ Guidelines:
         "OpenAI API Key",
         type="password",
         placeholder="sk-...",
-        help="Enter your OpenAI API key to enable the Data Assistant. Your key is never stored."
+        help="Enter your OpenAI API key to enable the Data Review LLM. Your key is never stored."
     )
 
     if not api_key:
