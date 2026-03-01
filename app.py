@@ -19,7 +19,40 @@ st.set_page_config(
 YEARS = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 CHART_TEMPLATE = "plotly_white"
 
-# The 5 tracked spend categories and how they map to raw Budget Category values
+# ── Materials vs Labor category classification ──
+MATERIALS_CATS = [
+    "Supplies", "Appliances", "Flooring Materials", "Paint",
+    "Cabinets Materials", "Countertops Materials", "Windows",
+]
+LABOR_CATS = [
+    "Labor General", "Flooring Labor", "Electric General",
+    "Countertops Labor", "Plumbing", "Powerwash and Demo",
+    "Management Fee", "Scrape Ceiling", "Glaze", "Cabinets Labor",
+]
+
+MAT_COLORS = {
+    "Supplies":              "#2563eb",
+    "Appliances":            "#ef4444",
+    "Flooring Materials":    "#f59e0b",
+    "Paint":                 "#6366f1",
+    "Cabinets Materials":    "#8b5cf6",
+    "Countertops Materials": "#10b981",
+    "Windows":               "#06b6d4",
+}
+LAB_COLORS = {
+    "Labor General":    "#0ea5e9",
+    "Flooring Labor":   "#f97316",
+    "Electric General": "#eab308",
+    "Countertops Labor":"#14b8a6",
+    "Plumbing":         "#3b82f6",
+    "Powerwash and Demo":"#a855f7",
+    "Management Fee":   "#64748b",
+    "Scrape Ceiling":   "#ec4899",
+    "Glaze":            "#84cc16",
+    "Cabinets Labor":   "#f43f5e",
+}
+
+# Legacy combined map kept for outlier detection
 CATEGORY_MAP = {
     "Paint":        ["Paint"],
     "Labor General": ["Labor General"],
@@ -484,75 +517,159 @@ elif view == "2 — Portfolio Overview":
 # VIEW 3: 5-YEAR LINE-ITEM TREND
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "3 — Category Trends":
-    banner("5-Year Category Cost Trend", "Tracking Paint, Labor General, Flooring, Countertops, and Appliances per Full Turn")
+    banner("Category Cost Trends", "All 17 budget categories tracked — Materials and Labor analyzed separately per Full Turn")
 
     ft_5yr = ft_lines[ft_lines["Year"].isin(YEARS)].copy()
-    ft_5yr_tracked = ft_5yr[ft_5yr["Tracked Category"] != "Other"].copy()
-
-    # Avg cost per tracked category per turn per year
-    cat_year_spend = ft_5yr_tracked.groupby(["Tracked Category", "Year"])["Invoice Amount"].sum().reset_index()
     turns_year = ft_turns[ft_turns["Year"].isin(YEARS)].groupby("Year").size().reset_index(name="turns")
-    cat_year_spend = cat_year_spend.merge(turns_year, on="Year")
-    cat_year_spend["Avg Per Turn"] = cat_year_spend["Invoice Amount"] / cat_year_spend["turns"]
 
-    # KPIs per category (latest year)
-    latest = cat_year_spend[cat_year_spend["Year"] == 2025]
-    cols = st.columns(5)
-    for i, cat in enumerate(CATEGORY_MAP.keys()):
-        val = latest[latest["Tracked Category"] == cat]["Avg Per Turn"]
-        cols[i].metric(cat, fmt(val.iloc[0]) if len(val) else "—")
+    # Compute avg cost per category per turn per year (all raw categories)
+    cat_year_all = ft_5yr.groupby(["Budget Category", "Year"])["Invoice Amount"].sum().reset_index()
+    cat_year_all = cat_year_all.merge(turns_year, on="Year")
+    cat_year_all["Avg Per Turn"] = cat_year_all["Invoice Amount"] / cat_year_all["turns"]
 
-    section("Avg Cost per Full Turn — 5 Tracked Categories")
+    # Materials vs Labor totals for latest year
+    mat_5yr = ft_5yr[ft_5yr["Budget Category"].isin(MATERIALS_CATS)]
+    lab_5yr = ft_5yr[ft_5yr["Budget Category"].isin(LABOR_CATS)]
+    mat_total = mat_5yr["Invoice Amount"].sum()
+    lab_total = lab_5yr["Invoice Amount"].sum()
+    total_5yr = mat_total + lab_total
 
-    # Multi-line chart
-    fig = go.Figure()
-    for cat, color in CAT_COLORS.items():
-        subset = cat_year_spend[cat_year_spend["Tracked Category"] == cat].sort_values("Year")
-        fig.add_trace(go.Scatter(
-            x=subset["Year"], y=subset["Avg Per Turn"],
-            name=cat, mode="lines+markers",
-            line=dict(color=color, width=3),
-            marker=dict(size=8),
-            hovertemplate=f"{cat}<br>%{{x}}: %{{y:$,.0f}}<extra></extra>",
-        ))
+    n_turns_total = ft_turns[ft_turns["Year"].isin(YEARS)]["Turn Key"].nunique()
+    mat_per_turn = mat_total / n_turns_total if n_turns_total > 0 else 0
+    lab_per_turn = lab_total / n_turns_total if n_turns_total > 0 else 0
 
-    fig.update_layout(
+    # KPIs
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Materials / Turn", fmt(mat_per_turn))
+    c2.metric("Labor / Turn", fmt(lab_per_turn))
+    c3.metric("Materials Share", f"{mat_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—")
+    c4.metric("Labor Share", f"{lab_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—")
+    c5.metric("Budget Categories", "17")
+
+    # ══════════════════════════════════════════════════
+    # MATERIALS CHART
+    # ══════════════════════════════════════════════════
+    section("Materials — Avg Cost per Full Turn by Category")
+
+    mat_data = cat_year_all[cat_year_all["Budget Category"].isin(MATERIALS_CATS)]
+    fig_mat = go.Figure()
+    for cat in MATERIALS_CATS:
+        subset = mat_data[mat_data["Budget Category"] == cat].sort_values("Year")
+        if len(subset) > 0:
+            fig_mat.add_trace(go.Scatter(
+                x=subset["Year"], y=subset["Avg Per Turn"],
+                name=cat, mode="lines+markers",
+                line=dict(color=MAT_COLORS.get(cat, "#94a3b8"), width=2.5),
+                marker=dict(size=7),
+                hovertemplate=f"{cat}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
+            ))
+    fig_mat.update_layout(
         template=CHART_TEMPLATE,
-        xaxis=dict(dtick=1, title=""),
-        yaxis=dict(title="Avg Cost per Full Turn ($)", gridcolor="#f1f5f9"),
-        legend=dict(orientation="h", yanchor="top", y=-0.1, font=dict(size=12)),
-        margin=dict(t=20, b=60), height=450,
-        hovermode="x unified",
+        xaxis=dict(dtick=1, title=""), yaxis=dict(title="Avg Cost per Full Turn ($)", gridcolor="#f1f5f9"),
+        legend=dict(orientation="h", yanchor="top", y=-0.12, font=dict(size=11)),
+        margin=dict(t=10, b=80), height=420, hovermode="x unified",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_mat, use_container_width=True)
 
-    # Data table
-    pivot = cat_year_spend.pivot_table(
-        index="Tracked Category", columns="Year", values="Avg Per Turn", fill_value=0
-    ).reindex(columns=YEARS, fill_value=0)
-    pivot = pivot.reindex(CATEGORY_MAP.keys())
-    pivot_display = pivot.copy()
-    for c in pivot_display.columns:
-        pivot_display[c] = pivot_display[c].apply(lambda x: fmt(x) if x > 0 else "—")
-    st.dataframe(pivot_display, use_container_width=True)
+    # Materials data table
+    mat_pivot = cat_year_all[cat_year_all["Budget Category"].isin(MATERIALS_CATS)].pivot_table(
+        index="Budget Category", columns="Year", values="Avg Per Turn", fill_value=0
+    ).reindex(columns=YEARS, fill_value=0).reindex(MATERIALS_CATS)
+    mat_pivot_d = mat_pivot.copy()
+    for c in mat_pivot_d.columns:
+        mat_pivot_d[c] = mat_pivot_d[c].apply(lambda x: fmt(x) if x > 0 else "—")
+    st.dataframe(mat_pivot_d, use_container_width=True)
 
-    # ── Outlier Detection: 1.5 SD ──
-    # Compute per-property, per-category stats
+    # ══════════════════════════════════════════════════
+    # LABOR CHART
+    # ══════════════════════════════════════════════════
+    section("Labor & Services — Avg Cost per Full Turn by Category")
+
+    lab_data = cat_year_all[cat_year_all["Budget Category"].isin(LABOR_CATS)]
+    fig_lab = go.Figure()
+    for cat in LABOR_CATS:
+        subset = lab_data[lab_data["Budget Category"] == cat].sort_values("Year")
+        if len(subset) > 0:
+            fig_lab.add_trace(go.Scatter(
+                x=subset["Year"], y=subset["Avg Per Turn"],
+                name=cat, mode="lines+markers",
+                line=dict(color=LAB_COLORS.get(cat, "#94a3b8"), width=2.5),
+                marker=dict(size=7),
+                hovertemplate=f"{cat}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
+            ))
+    fig_lab.update_layout(
+        template=CHART_TEMPLATE,
+        xaxis=dict(dtick=1, title=""), yaxis=dict(title="Avg Cost per Full Turn ($)", gridcolor="#f1f5f9"),
+        legend=dict(orientation="h", yanchor="top", y=-0.12, font=dict(size=11)),
+        margin=dict(t=10, b=80), height=420, hovermode="x unified",
+    )
+    st.plotly_chart(fig_lab, use_container_width=True)
+
+    # Labor data table
+    lab_pivot = cat_year_all[cat_year_all["Budget Category"].isin(LABOR_CATS)].pivot_table(
+        index="Budget Category", columns="Year", values="Avg Per Turn", fill_value=0
+    ).reindex(columns=YEARS, fill_value=0).reindex(LABOR_CATS)
+    lab_pivot_d = lab_pivot.copy()
+    for c in lab_pivot_d.columns:
+        lab_pivot_d[c] = lab_pivot_d[c].apply(lambda x: fmt(x) if x > 0 else "—")
+    st.dataframe(lab_pivot_d, use_container_width=True)
+
+    # ══════════════════════════════════════════════════
+    # COMBINED STACKED VIEW
+    # ══════════════════════════════════════════════════
+    section("Materials vs Labor — Total Spend Split by Year")
+
+    mat_by_yr = mat_5yr.groupby(ft_5yr["Year"])["Invoice Amount"].sum().reindex(YEARS, fill_value=0)
+    lab_by_yr = lab_5yr.groupby(ft_5yr["Year"])["Invoice Amount"].sum().reindex(YEARS, fill_value=0)
+
+    fig_stack = go.Figure()
+    fig_stack.add_trace(go.Bar(
+        x=[str(y) for y in YEARS], y=mat_by_yr.values,
+        name="Materials", marker_color="#2563eb",
+        hovertemplate="Materials: $%{y:,.0f}<extra></extra>",
+    ))
+    fig_stack.add_trace(go.Bar(
+        x=[str(y) for y in YEARS], y=lab_by_yr.values,
+        name="Labor & Services", marker_color="#f59e0b",
+        hovertemplate="Labor: $%{y:,.0f}<extra></extra>",
+    ))
+    fig_stack.update_layout(
+        template=CHART_TEMPLATE, barmode="stack",
+        xaxis=dict(title=""), yaxis=dict(title="Total Spend ($)"),
+        legend=dict(orientation="h", y=-0.12, font=dict(size=12)),
+        margin=dict(t=10, b=50), height=380,
+    )
+    st.plotly_chart(fig_stack, use_container_width=True)
+
+    # Narrative
+    insight(
+        f"Materials represent <strong>{mat_total/total_5yr*100:.0f}%</strong> of tracked spend "
+        f"(<strong>{fmt(mat_per_turn)}</strong>/turn) while Labor & Services account for "
+        f"<strong>{lab_total/total_5yr*100:.0f}%</strong> (<strong>{fmt(lab_per_turn)}</strong>/turn). "
+        f"<strong>Supplies</strong> is the largest single materials category, and "
+        f"<strong>Labor General</strong> leads the services side."
+    )
+
+    # ══════════════════════════════════════════════════
+    # OUTLIER DETECTION (uses ALL raw categories now)
+    # ══════════════════════════════════════════════════
+
+    # Compute per-property, per-raw-category stats
     prop_cat = (
-        ft_5yr_tracked.groupby(["Property Name", "Tracked Category", "Turn Key"])["Invoice Amount"]
+        ft_5yr.groupby(["Property Name", "Budget Category", "Turn Key"])["Invoice Amount"]
         .sum().reset_index()
     )
     prop_cat_stats = (
-        prop_cat.groupby(["Property Name", "Tracked Category"])["Invoice Amount"]
+        prop_cat.groupby(["Property Name", "Budget Category"])["Invoice Amount"]
         .agg(["mean", "std", "count"]).reset_index()
     )
     prop_cat_stats["threshold"] = prop_cat_stats["mean"] + 1.5 * prop_cat_stats["std"]
 
     # Flag outliers
-    flagged = prop_cat.merge(prop_cat_stats, on=["Property Name", "Tracked Category"])
+    flagged = prop_cat.merge(prop_cat_stats, on=["Property Name", "Budget Category"])
     flagged = flagged[
         (flagged["Invoice Amount"] > flagged["threshold"])
-        & (flagged["count"] >= 3)  # need min data to compute meaningful SD
+        & (flagged["count"] >= 3)
     ].copy()
     flagged["Excess"] = flagged["Invoice Amount"] - flagged["mean"]
     flagged["Excess %"] = (flagged["Excess"] / flagged["mean"] * 100)
@@ -572,12 +689,12 @@ elif view == "3 — Category Trends":
     c1, c2, c3 = st.columns(3)
     c1.metric("Outliers (Last 12 Mo)", len(recent_outliers))
     c2.metric("Total Excess Spend", fmt(recent_outliers["Excess"].sum()) if len(recent_outliers) else "—")
-    top_cat_recent = recent_outliers.groupby("Tracked Category")["Excess"].sum().idxmax() if len(recent_outliers) else "—"
+    top_cat_recent = recent_outliers.groupby("Budget Category")["Excess"].sum().idxmax() if len(recent_outliers) else "—"
     c3.metric("Top Flagged Category", top_cat_recent)
 
     if len(recent_outliers) > 0:
         r_display = recent_outliers[[
-            "Property Name", "Unit Label", "Move-Out Date", "Tracked Category",
+            "Property Name", "Unit Label", "Move-Out Date", "Budget Category",
             "Invoice Amount", "mean", "Excess", "Excess %", "SDs Over"
         ]].copy()
         r_display["Move-Out Date"] = r_display["Move-Out Date"].dt.strftime("%b %d, %Y")
@@ -590,10 +707,9 @@ elif view == "3 — Category Trends":
                               "Actual Spend", "Property Avg", "Excess ($)", "Excess (%)", "Std Devs Over"]
         st.dataframe(r_display, use_container_width=True, hide_index=True, height=min(400, 60 + len(recent_outliers) * 35))
 
-        # Narrative
         worst = recent_outliers.iloc[0]
         insight(
-            f"Highest recent outlier: <strong>{worst['Tracked Category']}</strong> at "
+            f"Highest recent outlier: <strong>{worst['Budget Category']}</strong> at "
             f"<strong>{worst['Property Name']}</strong> (Unit {worst['Unit Label']}) — "
             f"spent <strong>{fmt(worst['Invoice Amount'])}</strong> vs property avg of "
             f"<strong>{fmt(worst['mean'])}</strong>, exceeding by <strong>{fmt(worst['Excess'])}</strong>."
@@ -615,7 +731,7 @@ elif view == "3 — Category Trends":
 
     if len(historical_outliers) > 0:
         h_display = historical_outliers[[
-            "Property Name", "Unit Label", "Move-Out Date", "Tracked Category",
+            "Property Name", "Unit Label", "Move-Out Date", "Budget Category",
             "Invoice Amount", "mean", "Excess", "Excess %", "SDs Over"
         ]].copy()
         h_display["Move-Out Date"] = h_display["Move-Out Date"].dt.strftime("%b %d, %Y")
@@ -628,8 +744,9 @@ elif view == "3 — Category Trends":
                               "Actual Spend", "Property Avg", "Excess ($)", "Excess (%)", "Std Devs Over"]
         st.dataframe(h_display, use_container_width=True, hide_index=True, height=500)
 
-        # Which categories flag most (bar chart)
-        cat_flags = historical_outliers.groupby("Tracked Category").agg(
+        # Which categories flag most
+        all_cat_colors = {**MAT_COLORS, **LAB_COLORS}
+        cat_flags = historical_outliers.groupby("Budget Category").agg(
             Flags=("Turn Key", "count"),
             Total_Excess=("Excess", "sum"),
         ).reset_index().sort_values("Total_Excess", ascending=False)
@@ -637,26 +754,26 @@ elif view == "3 — Category Trends":
         col1, col2 = st.columns(2)
         with col1:
             fig_flags = px.bar(
-                cat_flags, x="Tracked Category", y="Flags", text="Flags",
-                template=CHART_TEMPLATE, color="Tracked Category",
-                color_discrete_map=CAT_COLORS,
+                cat_flags, x="Budget Category", y="Flags", text="Flags",
+                template=CHART_TEMPLATE, color="Budget Category",
+                color_discrete_map=all_cat_colors,
             )
             fig_flags.update_traces(textposition="outside")
-            fig_flags.update_layout(margin=dict(t=10, b=10), height=300, showlegend=False,
-                                    xaxis_title="", yaxis_title="Outlier Count",
+            fig_flags.update_layout(margin=dict(t=10, b=60), height=340, showlegend=False,
+                                    xaxis_title="", yaxis_title="Outlier Count", xaxis_tickangle=-45,
                                     title=dict(text="Outlier Frequency by Category", font=dict(size=13)))
             st.plotly_chart(fig_flags, use_container_width=True)
 
         with col2:
             fig_excess = px.bar(
-                cat_flags, x="Tracked Category", y="Total_Excess",
+                cat_flags, x="Budget Category", y="Total_Excess",
                 text=cat_flags["Total_Excess"].apply(fmt),
-                template=CHART_TEMPLATE, color="Tracked Category",
-                color_discrete_map=CAT_COLORS,
+                template=CHART_TEMPLATE, color="Budget Category",
+                color_discrete_map=all_cat_colors,
             )
             fig_excess.update_traces(textposition="outside")
-            fig_excess.update_layout(margin=dict(t=10, b=10), height=300, showlegend=False,
-                                     xaxis_title="", yaxis_title="Total Excess ($)",
+            fig_excess.update_layout(margin=dict(t=10, b=60), height=340, showlegend=False,
+                                     xaxis_title="", yaxis_title="Total Excess ($)", xaxis_tickangle=-45,
                                      title=dict(text="Cumulative Excess by Category", font=dict(size=13)))
             st.plotly_chart(fig_excess, use_container_width=True)
 
