@@ -16,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-YEARS = [2021, 2022, 2023, 2024, 2025]
+YEARS = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 CHART_TEMPLATE = "plotly_white"
 
 # The 5 tracked spend categories and how they map to raw Budget Category values
@@ -331,14 +331,14 @@ if view == "1 — Property Level":
 # VIEW 2: PORTFOLIO SUMMARY
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "2 — Portfolio Summary":
-    banner("Portfolio Summary", "Average Full Turn cost per property — 2022 through 2025")
+    banner("Portfolio Summary", "Average Full Turn cost per property — 2016 through 2025")
 
-    SUMMARY_YEARS = [2022, 2023, 2024, 2025]
+    SUMMARY_YEARS = YEARS
 
     # KPIs
     recent = ft_turns[ft_turns["Year"].isin(SUMMARY_YEARS)]
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Full Turns (2022–25)", f"{len(recent):,}")
+    c1.metric("Full Turns (2016–25)", f"{len(recent):,}")
     c2.metric("Total Spend", fmt(recent["total_cost"].sum()))
     c3.metric("Portfolio Avg Cost", fmt(recent["total_cost"].mean()))
     c4.metric("Properties Active", f"{recent['Property ID'].nunique()}")
@@ -360,7 +360,7 @@ elif view == "2 — Portfolio Summary":
     )
 
     # All-years avg
-    avg_matrix["4-Year Avg"] = avg_matrix[SUMMARY_YEARS].replace(0, np.nan).mean(axis=1)
+    avg_matrix["Avg (All Years)"] = avg_matrix[SUMMARY_YEARS].replace(0, np.nan).mean(axis=1)
 
     # YoY change
     avg_matrix["2024 → 2025"] = avg_matrix.apply(
@@ -368,14 +368,14 @@ elif view == "2 — Portfolio Summary":
         axis=1,
     )
 
-    avg_matrix = avg_matrix.sort_values("4-Year Avg", ascending=False)
+    avg_matrix = avg_matrix.sort_values("Avg (All Years)", ascending=False)
 
     # Portfolio total row
     portfolio_row = {}
     for y in SUMMARY_YEARS:
         yr_data = recent[recent["Year"] == y]["total_cost"]
         portfolio_row[y] = yr_data.mean() if len(yr_data) else 0
-    portfolio_row["4-Year Avg"] = recent["total_cost"].mean()
+    portfolio_row["Avg (All Years)"] = recent["total_cost"].mean()
     portfolio_row["2024 → 2025"] = (
         ((portfolio_row[2025] - portfolio_row[2024]) / portfolio_row[2024] * 100)
         if portfolio_row[2024] > 0 and portfolio_row[2025] > 0 else np.nan
@@ -386,7 +386,7 @@ elif view == "2 — Portfolio Summary":
 
     with tab_avg:
         display = avg_matrix.copy()
-        for y in SUMMARY_YEARS + ["4-Year Avg"]:
+        for y in SUMMARY_YEARS + ["Avg (All Years)"]:
             display[y] = display[y].apply(lambda x: fmt(x) if x > 0 else "—")
         display["2024 → 2025"] = display["2024 → 2025"].apply(
             lambda x: pct(x) if pd.notna(x) else "—"
@@ -394,14 +394,14 @@ elif view == "2 — Portfolio Summary":
         st.dataframe(display, use_container_width=True, height=560)
 
         # Narrative
-        top_prop = avg_matrix.drop("PORTFOLIO AVG").sort_values("4-Year Avg", ascending=False).index[0]
-        low_prop = avg_matrix.drop("PORTFOLIO AVG").sort_values("4-Year Avg", ascending=True)
-        low_prop = low_prop[low_prop["4-Year Avg"] > 0].index[0]
-        port_avg = avg_matrix.loc["PORTFOLIO AVG", "4-Year Avg"]
+        top_prop = avg_matrix.drop("PORTFOLIO AVG").sort_values("Avg (All Years)", ascending=False).index[0]
+        low_prop = avg_matrix.drop("PORTFOLIO AVG").sort_values("Avg (All Years)", ascending=True)
+        low_prop = low_prop[low_prop["Avg (All Years)"] > 0].index[0]
+        port_avg = avg_matrix.loc["PORTFOLIO AVG", "Avg (All Years)"]
         yoy_chg = avg_matrix.loc["PORTFOLIO AVG", "2024 → 2025"]
 
         insight(
-            f"Portfolio-wide average Full Turn cost is <strong>{fmt(port_avg)}</strong> over 2022–2025. "
+            f"Portfolio-wide average Full Turn cost is <strong>{fmt(port_avg)}</strong> over 2016–2025. "
             f"<strong>{top_prop}</strong> has the highest average, while <strong>{low_prop}</strong> runs lowest. "
             f"Year-over-year, portfolio costs moved <strong>{pct(yoy_chg)}</strong> from 2024 to 2025."
         )
@@ -757,7 +757,7 @@ elif view == "6 — Anomaly Detection":
         threshold = st.slider("Minimum turn count to flag", 3, 10, 4)
 
         unit_freq = (
-            all_turns.groupby(["Property Name", "Unit Display"])
+            all_turns.groupby(["Property Name", "Unit Label"])
             .agg(turn_count=("Turn Key", "nunique"), total_spend=("total_cost", "sum"),
                  types=("Turn Type", lambda x: ", ".join(sorted(x.unique()))))
             .reset_index().sort_values("turn_count", ascending=False)
