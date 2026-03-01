@@ -11,12 +11,13 @@ from datetime import datetime
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 st.set_page_config(
     page_title="Full Turn Analytics | Portfolio Dashboard",
-    page_icon="https://em-content.zobj.net/source/apple/391/chart-increasing_1f4c8.png",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 YEARS = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+TREND_YEARS = [2021, 2022, 2023, 2024, 2025]
 CHART_TEMPLATE = "plotly_white"
 
 # ── Materials vs Labor category classification ──
@@ -52,21 +53,6 @@ LAB_COLORS = {
     "Cabinets Labor":   "#f43f5e",
 }
 
-# Legacy combined map kept for outlier detection
-CATEGORY_MAP = {
-    "Paint":        ["Paint"],
-    "Labor General": ["Labor General"],
-    "Flooring":     ["Flooring Materials", "Flooring Labor"],
-    "Countertops":  ["Countertops Labor", "Countertops Materials"],
-    "Appliances":   ["Appliances"],
-}
-CAT_COLORS = {
-    "Paint":         "#6366f1",
-    "Labor General": "#0ea5e9",
-    "Flooring":      "#f59e0b",
-    "Countertops":   "#10b981",
-    "Appliances":    "#ef4444",
-}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -226,13 +212,6 @@ def load_data():
     # ── Full Turn only ──
     ft = df[df["Turn Type"] == "Full Turn"].copy()
     ft["Year"] = ft["Move-Out Date"].dt.year
-
-    # ── Map to tracked categories ──
-    reverse_map = {}
-    for group, raw_cats in CATEGORY_MAP.items():
-        for rc in raw_cats:
-            reverse_map[rc] = group
-    ft["Tracked Category"] = ft["Budget Category"].map(reverse_map).fillna("Other")
 
     # ── Turn-level summary ──
     turns = (
@@ -514,27 +493,28 @@ elif view == "2 — Portfolio Overview":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 3: 5-YEAR LINE-ITEM TREND
+# VIEW 3: CATEGORY TRENDS (Last 5 Years)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "3 — Category Trends":
-    banner("Category Cost Trends", "All 17 budget categories tracked — Materials and Labor analyzed separately per Full Turn")
+    banner("Category Cost Trends", f"5-year trend ({TREND_YEARS[0]}–{TREND_YEARS[-1]}) — Materials and Labor analyzed separately per Full Turn")
 
-    ft_5yr = ft_lines[ft_lines["Year"].isin(YEARS)].copy()
-    turns_year = ft_turns[ft_turns["Year"].isin(YEARS)].groupby("Year").size().reset_index(name="turns")
+    ft_trend = ft_lines[ft_lines["Year"].isin(TREND_YEARS)].copy()
+    ft_all = ft_lines.copy()  # Keep all years for outlier detection
+    turns_year = ft_turns[ft_turns["Year"].isin(TREND_YEARS)].groupby("Year").size().reset_index(name="turns")
 
     # Compute avg cost per category per turn per year (all raw categories)
-    cat_year_all = ft_5yr.groupby(["Budget Category", "Year"])["Invoice Amount"].sum().reset_index()
+    cat_year_all = ft_trend.groupby(["Budget Category", "Year"])["Invoice Amount"].sum().reset_index()
     cat_year_all = cat_year_all.merge(turns_year, on="Year")
     cat_year_all["Avg Per Turn"] = cat_year_all["Invoice Amount"] / cat_year_all["turns"]
 
-    # Materials vs Labor totals for latest year
-    mat_5yr = ft_5yr[ft_5yr["Budget Category"].isin(MATERIALS_CATS)]
-    lab_5yr = ft_5yr[ft_5yr["Budget Category"].isin(LABOR_CATS)]
+    # Materials vs Labor totals (5-year window)
+    mat_5yr = ft_trend[ft_trend["Budget Category"].isin(MATERIALS_CATS)]
+    lab_5yr = ft_trend[ft_trend["Budget Category"].isin(LABOR_CATS)]
     mat_total = mat_5yr["Invoice Amount"].sum()
     lab_total = lab_5yr["Invoice Amount"].sum()
     total_5yr = mat_total + lab_total
 
-    n_turns_total = ft_turns[ft_turns["Year"].isin(YEARS)]["Turn Key"].nunique()
+    n_turns_total = ft_turns[ft_turns["Year"].isin(TREND_YEARS)]["Turn Key"].nunique()
     mat_per_turn = mat_total / n_turns_total if n_turns_total > 0 else 0
     lab_per_turn = lab_total / n_turns_total if n_turns_total > 0 else 0
 
@@ -571,13 +551,15 @@ elif view == "3 — Category Trends":
     )
     st.plotly_chart(fig_mat, use_container_width=True)
 
-    # Materials data table
+    # Materials data table with YoY % change
     mat_pivot = cat_year_all[cat_year_all["Budget Category"].isin(MATERIALS_CATS)].pivot_table(
         index="Budget Category", columns="Year", values="Avg Per Turn", fill_value=0
-    ).reindex(columns=YEARS, fill_value=0).reindex(MATERIALS_CATS)
+    ).reindex(columns=TREND_YEARS, fill_value=0).reindex(MATERIALS_CATS)
+    mat_yoy = mat_pivot[TREND_YEARS[-1]] / mat_pivot[TREND_YEARS[-2]].replace(0, np.nan) - 1
     mat_pivot_d = mat_pivot.copy()
     for c in mat_pivot_d.columns:
         mat_pivot_d[c] = mat_pivot_d[c].apply(lambda x: fmt(x) if x > 0 else "—")
+    mat_pivot_d["YoY Δ"] = mat_yoy.apply(lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—")
     st.dataframe(mat_pivot_d, use_container_width=True)
 
     # ══════════════════════════════════════════════════
@@ -605,13 +587,15 @@ elif view == "3 — Category Trends":
     )
     st.plotly_chart(fig_lab, use_container_width=True)
 
-    # Labor data table
+    # Labor data table with YoY % change
     lab_pivot = cat_year_all[cat_year_all["Budget Category"].isin(LABOR_CATS)].pivot_table(
         index="Budget Category", columns="Year", values="Avg Per Turn", fill_value=0
-    ).reindex(columns=YEARS, fill_value=0).reindex(LABOR_CATS)
+    ).reindex(columns=TREND_YEARS, fill_value=0).reindex(LABOR_CATS)
+    lab_yoy = lab_pivot[TREND_YEARS[-1]] / lab_pivot[TREND_YEARS[-2]].replace(0, np.nan) - 1
     lab_pivot_d = lab_pivot.copy()
     for c in lab_pivot_d.columns:
         lab_pivot_d[c] = lab_pivot_d[c].apply(lambda x: fmt(x) if x > 0 else "—")
+    lab_pivot_d["YoY Δ"] = lab_yoy.apply(lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—")
     st.dataframe(lab_pivot_d, use_container_width=True)
 
     # ══════════════════════════════════════════════════
@@ -619,17 +603,17 @@ elif view == "3 — Category Trends":
     # ══════════════════════════════════════════════════
     section("Materials vs Labor — Total Spend Split by Year")
 
-    mat_by_yr = mat_5yr.groupby(ft_5yr["Year"])["Invoice Amount"].sum().reindex(YEARS, fill_value=0)
-    lab_by_yr = lab_5yr.groupby(ft_5yr["Year"])["Invoice Amount"].sum().reindex(YEARS, fill_value=0)
+    mat_by_yr = mat_5yr.groupby("Year")["Invoice Amount"].sum().reindex(TREND_YEARS, fill_value=0)
+    lab_by_yr = lab_5yr.groupby("Year")["Invoice Amount"].sum().reindex(TREND_YEARS, fill_value=0)
 
     fig_stack = go.Figure()
     fig_stack.add_trace(go.Bar(
-        x=[str(y) for y in YEARS], y=mat_by_yr.values,
+        x=[str(y) for y in TREND_YEARS], y=mat_by_yr.values,
         name="Materials", marker_color="#2563eb",
         hovertemplate="Materials: $%{y:,.0f}<extra></extra>",
     ))
     fig_stack.add_trace(go.Bar(
-        x=[str(y) for y in YEARS], y=lab_by_yr.values,
+        x=[str(y) for y in TREND_YEARS], y=lab_by_yr.values,
         name="Labor & Services", marker_color="#f59e0b",
         hovertemplate="Labor: $%{y:,.0f}<extra></extra>",
     ))
@@ -642,10 +626,13 @@ elif view == "3 — Category Trends":
     st.plotly_chart(fig_stack, use_container_width=True)
 
     # Narrative
+    mat_share = f"{mat_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—"
+    lab_share = f"{lab_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—"
     insight(
-        f"Materials represent <strong>{mat_total/total_5yr*100:.0f}%</strong> of tracked spend "
+        f"Over the last 5 years ({TREND_YEARS[0]}–{TREND_YEARS[-1]}), Materials represent "
+        f"<strong>{mat_share}</strong> of tracked spend "
         f"(<strong>{fmt(mat_per_turn)}</strong>/turn) while Labor & Services account for "
-        f"<strong>{lab_total/total_5yr*100:.0f}%</strong> (<strong>{fmt(lab_per_turn)}</strong>/turn). "
+        f"<strong>{lab_share}</strong> (<strong>{fmt(lab_per_turn)}</strong>/turn). "
         f"<strong>Supplies</strong> is the largest single materials category, and "
         f"<strong>Labor General</strong> leads the services side."
     )
@@ -654,9 +641,9 @@ elif view == "3 — Category Trends":
     # OUTLIER DETECTION (uses ALL raw categories now)
     # ══════════════════════════════════════════════════
 
-    # Compute per-property, per-raw-category stats
+    # Compute per-property, per-raw-category stats (using ALL years for statistical depth)
     prop_cat = (
-        ft_5yr.groupby(["Property Name", "Budget Category", "Turn Key"])["Invoice Amount"]
+        ft_all.groupby(["Property Name", "Budget Category", "Turn Key"])["Invoice Amount"]
         .sum().reset_index()
     )
     prop_cat_stats = (
@@ -701,8 +688,8 @@ elif view == "3 — Category Trends":
         r_display["Invoice Amount"] = r_display["Invoice Amount"].apply(fmt)
         r_display["mean"] = r_display["mean"].apply(fmt)
         r_display["Excess"] = r_display["Excess"].apply(fmt)
-        r_display["Excess %"] = r_display["Excess %"].apply(lambda x: f"+{x:.0f}%")
-        r_display["SDs Over"] = r_display["SDs Over"].apply(lambda x: f"{x:.1f}σ")
+        r_display["Excess %"] = r_display["Excess %"].apply(lambda x: f"+{x:.0f}%" if pd.notna(x) and np.isfinite(x) else "—")
+        r_display["SDs Over"] = r_display["SDs Over"].apply(lambda x: f"{x:.1f}σ" if pd.notna(x) and np.isfinite(x) else "—")
         r_display.columns = ["Property", "Unit", "Move-Out", "Category",
                               "Actual Spend", "Property Avg", "Excess ($)", "Excess (%)", "Std Devs Over"]
         st.dataframe(r_display, use_container_width=True, hide_index=True, height=min(400, 60 + len(recent_outliers) * 35))
@@ -738,8 +725,8 @@ elif view == "3 — Category Trends":
         h_display["Invoice Amount"] = h_display["Invoice Amount"].apply(fmt)
         h_display["mean"] = h_display["mean"].apply(fmt)
         h_display["Excess"] = h_display["Excess"].apply(fmt)
-        h_display["Excess %"] = h_display["Excess %"].apply(lambda x: f"+{x:.0f}%")
-        h_display["SDs Over"] = h_display["SDs Over"].apply(lambda x: f"{x:.1f}σ")
+        h_display["Excess %"] = h_display["Excess %"].apply(lambda x: f"+{x:.0f}%" if pd.notna(x) and np.isfinite(x) else "—")
+        h_display["SDs Over"] = h_display["SDs Over"].apply(lambda x: f"{x:.1f}σ" if pd.notna(x) and np.isfinite(x) else "—")
         h_display.columns = ["Property", "Unit", "Move-Out", "Category",
                               "Actual Spend", "Property Avg", "Excess ($)", "Excess (%)", "Std Devs Over"]
         st.dataframe(h_display, use_container_width=True, hide_index=True, height=500)
@@ -804,7 +791,7 @@ elif view == "3 — Category Trends":
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "5 — Recent Turns Audit":
     banner("Recent 10 Full Turn Audit",
-           "Detailed cost breakdown of the 10 most recent Full Turns — benchmarked against the portfolio 5-year average")
+           "Detailed cost breakdown of the 10 most recent Full Turns — benchmarked against the portfolio average")
 
     recent_10 = ft_turns.sort_values("completion_date", ascending=False).head(10).copy()
 
@@ -821,7 +808,7 @@ elif view == "5 — Recent Turns Audit":
     section("Overview — 10 Most Recent Full Turns")
 
     r10_display = recent_10.copy()
-    r10_display["#"] = range(1, 11)
+    r10_display["#"] = range(1, len(recent_10) + 1)
     r10_display["Completion"] = r10_display["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
     r10_display["Move-Out"] = r10_display["Move-Out Date"].dt.strftime("%b %d, %Y")
     r10_display["Cost"] = r10_display["total_cost"].apply(fmt)
@@ -842,7 +829,7 @@ elif view == "5 — Recent Turns Audit":
     st.dataframe(overview, use_container_width=True, hide_index=True)
 
     insight(
-        f"Portfolio 5-year average Full Turn cost: <strong>{fmt(port_avg)}</strong>. "
+        f"Portfolio average Full Turn cost: <strong>{fmt(port_avg)}</strong>. "
         f"Values in the 'vs Portfolio Avg' column show how each recent turn compares. "
         f"Expand any turn below to see line-item detail benchmarked against portfolio norms."
     )
@@ -912,7 +899,8 @@ elif view == "5 — Recent Turns Audit":
                 st.markdown(f"- **Duration:** {turn['Duration']:.0f} days" if pd.notna(turn['Duration']) else "- **Duration:** —")
                 st.markdown(f"- **Invoices:** {turn['line_items']}")
                 variance_total = turn["total_cost"] - port_avg
-                st.markdown(f"- **vs Portfolio:** {fmt(variance_total)} ({pct(variance_total/port_avg*100)})")
+                vs_pct = pct(variance_total / port_avg * 100) if port_avg > 0 else "—"
+                st.markdown(f"- **vs Portfolio:** {fmt(variance_total)} ({vs_pct})")
 
             # Raw invoice list
             with st.expander("View All Invoices"):
@@ -1187,7 +1175,7 @@ elif view == "1 — Executive Summary":
 
     # Add rank
     prop_bench["Rank"] = range(1, len(prop_bench) + 1)
-    prop_bench["vs Portfolio"] = ((prop_bench["avg_cost"] - portfolio_avg) / portfolio_avg * 100)
+    prop_bench["vs Portfolio"] = ((prop_bench["avg_cost"] - portfolio_avg) / portfolio_avg * 100) if portfolio_avg > 0 else 0
 
     col1, col2 = st.columns([3, 2])
     with col1:
@@ -1368,16 +1356,17 @@ elif view == "1 — Executive Summary":
                 "Severity": "Medium",
             })
 
-    # 3. Category inflation
-    for cat_name, raw_cats in CATEGORY_MAP.items():
-        cat24 = ft_lines[(ft_lines["Year"] == 2024) & (ft_lines["Budget Category"].isin(raw_cats))]["Invoice Amount"]
-        cat25 = ft_lines[(ft_lines["Year"] == 2025) & (ft_lines["Budget Category"].isin(raw_cats))]["Invoice Amount"]
-        if len(cat24) >= 5 and len(cat25) >= 5:
-            chg = ((cat25.mean() - cat24.mean()) / cat24.mean()) * 100
+    # 3. Category inflation (per-turn spend, all 17 raw categories)
+    for cat_name in MATERIALS_CATS + LABOR_CATS:
+        cat24_turns = ft_lines[(ft_lines["Year"] == 2024) & (ft_lines["Budget Category"] == cat_name)].groupby("Turn Key")["Invoice Amount"].sum()
+        cat25_turns = ft_lines[(ft_lines["Year"] == 2025) & (ft_lines["Budget Category"] == cat_name)].groupby("Turn Key")["Invoice Amount"].sum()
+        if len(cat24_turns) >= 5 and len(cat25_turns) >= 5:
+            avg24, avg25 = cat24_turns.mean(), cat25_turns.mean()
+            chg = ((avg25 - avg24) / avg24) * 100 if avg24 > 0 else 0
             if chg > 25:
                 risk_items.append({
                     "Risk": "Category Inflation",
-                    "Detail": f"{cat_name}: avg invoice up {chg:.0f}% YoY ({fmt(cat24.mean())} → {fmt(cat25.mean())})",
+                    "Detail": f"{cat_name}: avg per-turn spend up {chg:.0f}% YoY ({fmt(avg24)} → {fmt(avg25)})",
                     "Severity": "High" if chg > 50 else "Medium",
                 })
 
