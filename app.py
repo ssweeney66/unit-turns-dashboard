@@ -32,6 +32,18 @@ LABOR_CATS = [
     "Management Fee", "Scrape Ceiling", "Glaze", "Cabinets Labor",
 ]
 
+# ── Expense analysis constants ──
+EXPENSE_YEARS = [2022, 2023, 2024, 2025, 2026]
+CORE_LABOR = ["Flooring Labor", "Countertops Labor", "Cabinets Labor", "Paint", "Glaze"]
+CORE_MATERIALS = ["Flooring Materials", "Countertops Materials", "Cabinets Materials", "Appliances"]
+COST_TYPE_COLORS = {
+    "Materials": "#2563eb",
+    "Labor":     "#f59e0b",
+    "Mixed":     "#10b981",
+    "Fee":       "#6366f1",
+}
+COST_TYPES = ["Materials", "Labor", "Mixed", "Fee"]
+
 MAT_COLORS = {
     "Supplies":              "#2563eb",
     "Appliances":            "#ef4444",
@@ -159,6 +171,11 @@ def pct(val):
         return "—"
     return f"{val:+.1f}%"
 
+def expense_year_label(yr):
+    return "2026 YTD" if yr == 2026 else str(yr)
+
+EXPENSE_YEAR_LABELS = [expense_year_label(y) for y in EXPENSE_YEARS]
+
 def footer():
     st.markdown(
         '<div class="dashboard-footer">'
@@ -273,7 +290,7 @@ st.sidebar.caption(
 # VIEW 3: PROPERTY SUMMARY
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if view == "3 — Property Summary":
-    banner("Property Summary", "Select a property to review renovation volume, floor plan mix, and recent completions")
+    banner("Property Summary", "Renovation volume, floor plan comparison, and standardized expense analysis by property")
 
     prop = st.selectbox("Select Property", PROPERTIES)
     p_turns = ft_turns[ft_turns["Property Name"] == prop].copy()
@@ -341,40 +358,220 @@ if view == "3 — Property Summary":
                              xaxis_title="", yaxis_title="Turns")
         st.plotly_chart(fig_fp, use_container_width=True)
 
-    # ── Last 5 Completed Turns ──
-    section("Last 5 Completed Full Turns")
+    # ══════════════════════════════════════════════════
+    # FLOOR PLAN FILTER
+    # ══════════════════════════════════════════════════
+    st.markdown("---")
+    floor_plans = sorted(p_turns["Floor Plan"].dropna().unique())
+    fp_options = ["All Floor Plans"] + floor_plans
+    selected_fp = st.selectbox("Filter by Floor Plan", fp_options, key="prop_fp")
 
-    last5 = p_turns.sort_values("completion_date", ascending=False).head(5).copy()
-    last5["#"] = range(1, len(last5) + 1)
-    last5["Completion"] = last5["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
-    last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y")
-    last5["Cost"] = last5["total_cost"].apply(fmt)
-    last5["Dur"] = last5["Duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
+    if selected_fp == "All Floor Plans":
+        fp_turns = p_turns.copy()
+        fp_lines = p_lines.copy()
+    else:
+        fp_turns = p_turns[p_turns["Floor Plan"] == selected_fp].copy()
+        fp_lines = p_lines[p_lines["Floor Plan"] == selected_fp].copy()
 
-    disp = last5[["#", "Unit Label", "Floor Plan", "Move-Out", "Completion", "Cost", "Dur", "line_items"]]
-    disp = disp.rename(columns={"Unit Label": "Unit", "Dur": "Duration", "line_items": "Invoices"})
-    st.dataframe(disp, use_container_width=True, hide_index=True)
+    fp_label = selected_fp if selected_fp != "All Floor Plans" else "All Floor Plans"
 
-    # Expandable detail for each
-    for _, t in last5.iterrows():
-        with st.expander(f"Detail — {t['Unit Label']} — {t['Move-Out']}"):
-            items = p_lines[p_lines["Turn Key"] == t["Turn Key"]].sort_values("Invoice Date")
-            d = items[["Vendor Name", "Budget Category", "Invoice Amount", "Invoice Date", "Line Item Notes"]].copy()
-            d["Invoice Amount"] = d["Invoice Amount"].apply(lambda x: fmt(x, 2))
-            d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
-            d["Line Item Notes"] = d["Line Item Notes"].fillna("")
-            st.dataframe(d, use_container_width=True, hide_index=True)
+    # ══════════════════════════════════════════════════
+    # LAST 5 COMPLETED TURNS (floor-plan-filtered)
+    # ══════════════════════════════════════════════════
+    section(f"Last 5 Completed Full Turns — {fp_label}")
 
-    # Property narrative
+    last5 = fp_turns.sort_values("completion_date", ascending=False).head(5).copy()
+
+    if len(last5) == 0:
+        st.info(f"No completed Full Turns found for {fp_label}.")
+    else:
+        last5["#"] = range(1, len(last5) + 1)
+        last5["Completion"] = last5["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
+        last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y")
+        last5["Cost"] = last5["total_cost"].apply(fmt)
+        last5["Dur"] = last5["Duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
+
+        l5_disp = last5[["#", "Unit Label", "Floor Plan", "Move-Out", "Completion",
+                         "Cost", "Dur", "line_items"]].copy()
+        l5_disp.columns = ["#", "Unit", "Floor Plan", "Move-Out", "Completion",
+                           "Total Cost", "Duration", "Invoices"]
+        st.dataframe(l5_disp, use_container_width=True, hide_index=True)
+
+        for _, t in last5.iterrows():
+            with st.expander(f"Detail — {t['Unit Label']} — {t['Move-Out']}"):
+                items = fp_lines[fp_lines["Turn Key"] == t["Turn Key"]].sort_values("Invoice Date")
+                d = items[["Vendor Name", "Budget Category", "Cost Type",
+                           "Invoice Amount", "Invoice Date", "Line Item Notes"]].copy()
+                d["Invoice Amount"] = d["Invoice Amount"].apply(lambda x: fmt(x, 2))
+                d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
+                d["Line Item Notes"] = d["Line Item Notes"].fillna("")
+                st.dataframe(d, use_container_width=True, hide_index=True)
+
+    # ══════════════════════════════════════════════════
+    # EXPENSE SUMMARY BY COST TYPE
+    # ══════════════════════════════════════════════════
+
+    # ── Part 1: Combined summary (property-wide, all years) ──
+    section("Avg Full Turn Cost by Floor Plan — Cost Type Breakdown")
+    st.caption("Average cost per Full Turn by floor plan and cost type (property-wide, all years)")
+
+    fp_turn_counts = p_turns.groupby("Floor Plan")["Turn Key"].nunique().reset_index(name="n_turns")
+    fp_ct_spend = (
+        p_lines.groupby(["Floor Plan", "Cost Type"])["Invoice Amount"]
+        .sum().reset_index(name="total_spend")
+    )
+    fp_ct_spend = fp_ct_spend.merge(fp_turn_counts, on="Floor Plan", how="left")
+    fp_ct_spend["avg_per_turn"] = fp_ct_spend.apply(
+        lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
+    )
+
+    fp_ct_pivot = fp_ct_spend.pivot_table(
+        index="Floor Plan", columns="Cost Type",
+        values="avg_per_turn", fill_value=0
+    ).reindex(columns=COST_TYPES, fill_value=0)
+    fp_ct_pivot["Total"] = fp_ct_pivot.sum(axis=1)
+    fp_ct_pivot = fp_ct_pivot.sort_values("Total", ascending=False)
+
+    fp_ct_display = fp_ct_pivot.copy()
+    for col in fp_ct_display.columns:
+        fp_ct_display[col] = fp_ct_display[col].apply(fmt)
+    st.dataframe(fp_ct_display, use_container_width=True)
+
+    # ── Part 2: Year-by-year Cost Type trend (floor-plan-filtered) ──
+    section(f"Cost Type Trend by Year — {fp_label}")
+
+    trend_lines = fp_lines[fp_lines["Year"].isin(EXPENSE_YEARS)].copy()
+    trend_turn_counts = (
+        fp_turns[fp_turns["Year"].isin(EXPENSE_YEARS)]
+        .groupby("Year")["Turn Key"].nunique()
+        .reindex(EXPENSE_YEARS, fill_value=0)
+    )
+
+    ct_year_spend = (
+        trend_lines.groupby(["Cost Type", "Year"])["Invoice Amount"]
+        .sum().reset_index(name="total_spend")
+    )
+    ct_year_spend["n_turns"] = ct_year_spend["Year"].map(trend_turn_counts).fillna(0)
+    ct_year_spend["avg_per_turn"] = ct_year_spend.apply(
+        lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
+    )
+
+    ct_trend_pivot = ct_year_spend.pivot_table(
+        index="Cost Type", columns="Year",
+        values="avg_per_turn", fill_value=0
+    ).reindex(columns=EXPENSE_YEARS, fill_value=0).reindex(COST_TYPES)
+    ct_trend_pivot = ct_trend_pivot.fillna(0)
+
+    # Add Total row
+    ct_trend_pivot.loc["Total"] = ct_trend_pivot.sum()
+
+    col1, col2 = st.columns([2, 3])
+    with col1:
+        ct_trend_display = ct_trend_pivot.copy()
+        ct_trend_display.columns = EXPENSE_YEAR_LABELS
+        for col in ct_trend_display.columns:
+            ct_trend_display[col] = ct_trend_display[col].apply(fmt)
+        st.dataframe(ct_trend_display, use_container_width=True)
+
+    with col2:
+        fig_ct = go.Figure()
+        for ct in COST_TYPES:
+            row = ct_trend_pivot.loc[ct] if ct in ct_trend_pivot.index else pd.Series(0, index=EXPENSE_YEARS)
+            fig_ct.add_trace(go.Bar(
+                x=EXPENSE_YEAR_LABELS,
+                y=[row.get(y, 0) for y in EXPENSE_YEARS],
+                name=ct,
+                marker_color=COST_TYPE_COLORS.get(ct, "#94a3b8"),
+                hovertemplate=f"{ct}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
+            ))
+        fig_ct.update_layout(
+            template=CHART_TEMPLATE, barmode="stack",
+            xaxis=dict(title=""), yaxis=dict(title="Avg Cost per Turn ($)"),
+            legend=dict(orientation="h", y=-0.15, font=dict(size=11)),
+            margin=dict(t=10, b=50, l=10, r=10), height=340,
+        )
+        st.plotly_chart(fig_ct, use_container_width=True)
+
+    # ══════════════════════════════════════════════════
+    # DETAILED EXPENSE ANALYSIS BY BUDGET CATEGORY
+    # ══════════════════════════════════════════════════
+    section(f"Expense Analysis by Budget Category — {fp_label}")
+    st.caption("Average cost per Full Turn by budget category (2022 – 2026 YTD)")
+
+    # Pre-compute: spend by budget category and year
+    cat_year_spend = (
+        trend_lines.groupby(["Budget Category", "Year"])["Invoice Amount"]
+        .sum().reset_index(name="total_spend")
+    )
+    cat_year_spend["n_turns"] = cat_year_spend["Year"].map(trend_turn_counts).fillna(0)
+    cat_year_spend["avg_per_turn"] = cat_year_spend.apply(
+        lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
+    )
+
+    def render_category_table(title, categories, data):
+        """Render a pivot table for a set of budget categories."""
+        st.markdown(f"**{title}**")
+        subset = data[data["Budget Category"].isin(categories)]
+        if len(subset) == 0:
+            st.info(f"No data for {title.split(' (')[0]} categories.")
+            return
+        pivot = subset.pivot_table(
+            index="Budget Category", columns="Year",
+            values="avg_per_turn", fill_value=0
+        ).reindex(columns=EXPENSE_YEARS, fill_value=0)
+        # Keep only categories that exist in this property's data
+        pivot = pivot.reindex([c for c in categories if c in pivot.index])
+        pivot = pivot.fillna(0)
+        if len(pivot) == 0:
+            st.info(f"No data for {title.split(' (')[0]} categories.")
+            return
+        # Remove all-zero rows
+        pivot = pivot.loc[pivot.sum(axis=1) > 0]
+        if len(pivot) == 0:
+            st.info(f"No data for {title.split(' (')[0]} categories.")
+            return
+        # Add Total row
+        pivot.loc["Total"] = pivot.sum()
+        # Format
+        pivot_display = pivot.copy()
+        pivot_display.columns = EXPENSE_YEAR_LABELS
+        for col in pivot_display.columns:
+            pivot_display[col] = pivot_display[col].apply(fmt)
+        st.dataframe(pivot_display, use_container_width=True)
+
+    # Determine "Other" categories (everything not Core Labor or Core Materials)
+    all_known = set(CORE_LABOR + CORE_MATERIALS)
+    other_cats = sorted(set(trend_lines["Budget Category"].dropna().unique()) - all_known)
+
+    render_category_table("Core Labor (Avg per Turn)", CORE_LABOR, cat_year_spend)
+    st.markdown("")
+    render_category_table("Core Materials (Avg per Turn)", CORE_MATERIALS, cat_year_spend)
+    st.markdown("")
+    render_category_table("Other Categories (Avg per Turn)", other_cats, cat_year_spend)
+
+    # ══════════════════════════════════════════════════
+    # NARRATIVE INSIGHT
+    # ══════════════════════════════════════════════════
     total_spend = p_turns["total_cost"].sum()
     avg_cost = p_turns["total_cost"].mean()
     port_avg_all = ft_turns["total_cost"].mean()
     vs_port = ((avg_cost - port_avg_all) / port_avg_all * 100) if port_avg_all > 0 else 0
+
+    fp_context = ""
+    if selected_fp != "All Floor Plans" and len(fp_turns) > 0:
+        fp_avg = fp_turns["total_cost"].mean()
+        fp_context = (
+            f" The <strong>{selected_fp}</strong> floor plan accounts for "
+            f"<strong>{len(fp_turns)}</strong> turns with an average cost of "
+            f"<strong>{fmt(fp_avg)}</strong>."
+        )
+
     insight(
         f"<strong>{prop}</strong> has completed <strong>{len(p_turns):,}</strong> Full Turns "
         f"totaling <strong>{fmt(total_spend)}</strong>. "
         f"Average cost per turn is <strong>{fmt(avg_cost)}</strong>, which is "
-        f"<strong>{pct(vs_port)}</strong> vs the portfolio average of <strong>{fmt(port_avg_all)}</strong>."
+        f"<strong>{pct(vs_port)}</strong> vs the portfolio average of "
+        f"<strong>{fmt(port_avg_all)}</strong>.{fp_context}"
     )
     footer()
 
