@@ -449,7 +449,7 @@ if view == "3 — Property Summary":
     else:
         last5["#"] = range(1, len(last5) + 1)
         last5["Completion"] = last5["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
-        last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y")
+        last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
         last5["Cost"] = last5["total_cost"].apply(fmt)
         last5["Dur"] = last5["Duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
 
@@ -850,7 +850,7 @@ elif view == "4 — Category Trends":
             "Property Name", "Unit Label", "Move-Out Date", "Budget Category",
             "Invoice Amount", "mean", "Excess"
         ]].copy()
-        r_display["Move-Out Date"] = r_display["Move-Out Date"].dt.strftime("%b %d, %Y")
+        r_display["Move-Out Date"] = r_display["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
         r_display["Invoice Amount"] = r_display["Invoice Amount"].apply(fmt)
         r_display["mean"] = r_display["mean"].apply(fmt)
         r_display["Excess"] = r_display["Excess"].apply(fmt)
@@ -938,7 +938,7 @@ elif view == "5 — Unit Search":
         section("Turn History")
         for _, turn in unit_ts.iterrows():
             with st.expander(
-                f"**{turn['Turn Type']}** — {turn['Move-Out Date'].strftime('%b %d, %Y')} — "
+                f"**{turn['Turn Type']}** — {turn['Move-Out Date'].strftime('%b %d, %Y') if pd.notna(turn['Move-Out Date']) else '—'} — "
                 f"{fmt(turn['total_cost'])} ({turn['line_items']} invoices)"
             ):
                 items = unit_df[unit_df["Turn Key"] == turn["Turn Key"]].sort_values("Invoice Date")
@@ -1100,14 +1100,15 @@ elif view == "1 — Executive Summary":
         st.dataframe(pb_display, use_container_width=True, hide_index=True, height=480)
 
     # Identify best and worst performers
-    best = prop_bench.sort_values("avg_cost").iloc[0]
-    worst = prop_bench.sort_values("avg_cost").iloc[-1]
-    insight(
-        f"<strong>{worst['Property Name']}</strong> has the highest average Full Turn cost at "
-        f"<strong>{fmt(worst['avg_cost'])}</strong> ({pct(worst['vs Portfolio'])} above portfolio avg), "
-        f"while <strong>{best['Property Name']}</strong> runs most efficiently at "
-        f"<strong>{fmt(best['avg_cost'])}</strong>. Investigating what drives this gap could yield significant savings."
-    )
+    if len(prop_bench) >= 2:
+        best = prop_bench.sort_values("avg_cost").iloc[0]
+        worst = prop_bench.sort_values("avg_cost").iloc[-1]
+        insight(
+            f"<strong>{worst['Property Name']}</strong> has the highest average Full Turn cost at "
+            f"<strong>{fmt(worst['avg_cost'])}</strong> ({pct(worst['vs Portfolio'])} above portfolio avg), "
+            f"while <strong>{best['Property Name']}</strong> runs most efficiently at "
+            f"<strong>{fmt(best['avg_cost'])}</strong>. Investigating what drives this gap could yield significant savings."
+        )
 
     # ━━ Section 3: Vendor Concentration ━━
     section("Vendor Concentration — Risk & Spend Distribution")
@@ -1119,7 +1120,8 @@ elif view == "1 — Executive Summary":
         avg_invoice=("Invoice Amount", "mean"),
     ).reset_index().sort_values("total_spend", ascending=False)
 
-    vendor_data["Share"] = vendor_data["total_spend"] / vendor_data["total_spend"].sum() * 100
+    total_vendor_spend = vendor_data["total_spend"].sum()
+    vendor_data["Share"] = (vendor_data["total_spend"] / total_vendor_spend * 100) if total_vendor_spend > 0 else 0
     vendor_data["Cumulative"] = vendor_data["Share"].cumsum()
 
     top_n = 10
@@ -1230,7 +1232,7 @@ elif view == "1 — Executive Summary":
     for prop in PROPERTIES:
         p24 = ft_turns[(ft_turns["Property Name"] == prop) & (ft_turns["Year"] == 2024)]["total_cost"]
         p25 = ft_turns[(ft_turns["Property Name"] == prop) & (ft_turns["Year"] == 2025)]["total_cost"]
-        if len(p24) >= 2 and len(p25) >= 2:
+        if len(p24) >= 2 and len(p25) >= 2 and p24.mean() > 0:
             chg = ((p25.mean() - p24.mean()) / p24.mean()) * 100
             if chg > 20:
                 risk_items.append({
