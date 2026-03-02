@@ -319,7 +319,18 @@ def load_data():
 
 
 _df_all, ft_lines, ft_turns = load_data()
-PROPERTIES = sorted(ft_turns["Property Name"].unique())
+PROPERTY_ORDER = [
+    "Monterey Park", "Woodman", "Collins", "Lindley", "El Rancho",
+    "51 at the Village", "Alta Vista", "Roscoe", "Topanga", "Darby",
+    "Fruitland", "Dickens", "Garfield", "Woodbridge",
+]
+_all_props = set(ft_turns["Property Name"].unique())
+PROPERTIES = [p for p in PROPERTY_ORDER if p in _all_props] + sorted(_all_props - set(PROPERTY_ORDER))
+_PROP_RANK = {name: i for i, name in enumerate(PROPERTIES)}
+
+def prop_sort_key(names):
+    """Return sort keys for a Series/Index of property names using PROPERTY_ORDER."""
+    return names.map(lambda n: _PROP_RANK.get(n, 999))
 
 
 @st.cache_data
@@ -648,7 +659,7 @@ elif view == "2 — Portfolio Overview":
         axis=1,
     )
 
-    avg_matrix = avg_matrix.sort_values("Avg (All Years)", ascending=False)
+    avg_matrix = avg_matrix.loc[sorted(avg_matrix.index, key=lambda n: _PROP_RANK.get(n, 999))]
 
     # Portfolio total row
     portfolio_row = {}
@@ -695,7 +706,7 @@ elif view == "2 — Portfolio Overview":
 
     with tab_vol:
         count_matrix["Total"] = count_matrix.sum(axis=1)
-        count_matrix = count_matrix.sort_values("Total", ascending=False)
+        count_matrix = count_matrix.loc[sorted(count_matrix.index, key=lambda n: _PROP_RANK.get(n, 999))]
         count_matrix.loc["PORTFOLIO TOTAL"] = count_matrix.sum()
         count_matrix = count_matrix.astype(int)
         st.dataframe(count_matrix, use_container_width=True, height=560)
@@ -848,7 +859,9 @@ elif view == "4 — Category Trends":
     flagged = flagged.merge(turn_info, on=["Turn Key", "Property Name"], how="left")
 
     cutoff_12m = pd.Timestamp.now() - pd.DateOffset(months=12)
-    recent_outliers = flagged[flagged["Move-Out Date"] >= cutoff_12m].sort_values("Excess", ascending=False).copy()
+    recent_outliers = flagged[flagged["Move-Out Date"] >= cutoff_12m].copy()
+    recent_outliers["_order"] = prop_sort_key(recent_outliers["Property Name"])
+    recent_outliers = recent_outliers.sort_values(["_order", "Excess"], ascending=[True, False]).drop(columns="_order")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Outlier Flags", len(recent_outliers))
@@ -915,7 +928,9 @@ elif view == "5 — Unit Search":
 
     col1, col2 = st.columns(2)
     with col1:
-        prop_choice = st.selectbox("Property", sorted(_df_all["Property Name"].unique()))
+        _all_unit_props = list(_df_all["Property Name"].unique())
+        _all_unit_props_ordered = [p for p in PROPERTIES if p in _all_unit_props] + sorted(set(_all_unit_props) - set(PROPERTIES))
+        prop_choice = st.selectbox("Property", _all_unit_props_ordered)
     with col2:
         prop_units = sorted(_df_all[_df_all["Property Name"] == prop_choice]["Unit Label"].unique())
         unit_choice = st.selectbox("Unit", prop_units)
@@ -980,7 +995,6 @@ elif view == "1 — Executive Summary":
     banner("Executive Intelligence", "Strategic performance overview for senior leadership — Full Turn portfolio analytics")
 
     # ── Compute core metrics ──
-    recent_3yr = ft_turns[ft_turns["Year"].isin([2023, 2024, 2025])].copy()
     curr_year = ft_turns[ft_turns["Year"] == 2025]
     prev_year = ft_turns[ft_turns["Year"] == 2024]
 
@@ -1067,7 +1081,7 @@ elif view == "1 — Executive Summary":
         )
 
     # ━━ Section 2: Property Benchmarking ━━
-    section("Property Benchmarking — Cost Efficiency Ranking")
+    section("Property Benchmarking — By Portfolio Size")
 
     prop_bench = ft_turns[ft_turns["Year"].isin(YEARS)].groupby("Property Name").agg(
         turns=("Turn Key", "count"),
@@ -1075,7 +1089,9 @@ elif view == "1 — Executive Summary":
         median_cost=("total_cost", "median"),
         total_spend=("total_cost", "sum"),
         avg_duration=("Duration", "median"),
-    ).reset_index().sort_values("avg_cost", ascending=False)
+    ).reset_index()
+    prop_bench["_order"] = prop_sort_key(prop_bench["Property Name"])
+    prop_bench = prop_bench.sort_values("_order")
 
     # Add rank
     prop_bench["Rank"] = range(1, len(prop_bench) + 1)
@@ -1083,10 +1099,12 @@ elif view == "1 — Executive Summary":
 
     col1, col2 = st.columns([3, 2])
     with col1:
+        # Chart: reverse order so largest-unit property is at top of horizontal bar
+        chart_data = prop_bench.sort_values("_order", ascending=False)
         fig_bench = px.bar(
-            prop_bench.sort_values("avg_cost", ascending=True),
+            chart_data,
             y="Property Name", x="avg_cost", orientation="h",
-            text=prop_bench.sort_values("avg_cost", ascending=True)["avg_cost"].apply(fmt),
+            text=chart_data["avg_cost"].apply(fmt),
             template=CHART_TEMPLATE,
             color="avg_cost",
             color_continuous_scale=["#10b981", "#f59e0b", "#dc2626"],
@@ -1348,7 +1366,8 @@ elif view == "6 — Data Review LLM":
             turns=("Turn Key", "count"),
             avg_cost=("total_cost", "mean"),
             total_spend=("total_cost", "sum"),
-        ).sort_values("total_spend", ascending=False)
+        )
+        prop_stats = prop_stats.loc[sorted(prop_stats.index, key=lambda n: _PROP_RANK.get(n, 999))]
         for prop, row in prop_stats.iterrows():
             lines.append(f"  {prop}: {row['turns']} turns, avg ${row['avg_cost']:,.0f}, total ${row['total_spend']:,.0f}")
 
