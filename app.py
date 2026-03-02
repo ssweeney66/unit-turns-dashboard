@@ -23,13 +23,13 @@ CHART_TEMPLATE = "plotly_white"
 
 # ── Materials vs Labor category classification ──
 MATERIALS_CATS = [
-    "Supplies", "Appliances", "Flooring Materials", "Paint",
+    "Supplies", "Appliances", "Flooring Materials",
     "Cabinets Materials", "Countertops Materials", "Windows",
 ]
 LABOR_CATS = [
     "Labor General", "Flooring Labor", "Electric General",
     "Countertops Labor", "Plumbing", "Powerwash and Demo",
-    "Management Fee", "Scrape Ceiling", "Glaze", "Cabinets Labor",
+    "Management Fee", "Scrape Ceiling", "Glaze", "Cabinets Labor", "Paint",
 ]
 
 # ── Expense analysis constants ──
@@ -58,7 +58,6 @@ MAT_COLORS = {
     "Supplies":              "#2563eb",
     "Appliances":            "#ef4444",
     "Flooring Materials":    "#f59e0b",
-    "Paint":                 "#6366f1",
     "Cabinets Materials":    "#8b5cf6",
     "Countertops Materials": "#10b981",
     "Windows":               "#06b6d4",
@@ -74,6 +73,7 @@ LAB_COLORS = {
     "Scrape Ceiling":   "#ec4899",
     "Glaze":            "#84cc16",
     "Cabinets Labor":   "#f43f5e",
+    "Paint":            "#6366f1",
 }
 
 
@@ -547,7 +547,7 @@ if view == "3 — Property Summary":
         pivot_display.columns = EXPENSE_YEAR_LABELS
         for col in pivot_display.columns:
             pivot_display[col] = pivot_display[col].apply(fmt)
-        pivot_display["YoY Δ"] = yoy.apply(
+        pivot_display["'24→'25"] = yoy.apply(
             lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
         )
         st.dataframe(pivot_display, use_container_width=True)
@@ -764,7 +764,7 @@ elif view == "4 — Category Trends":
     mat_pivot_d = mat_pivot.copy()
     for c in mat_pivot_d.columns:
         mat_pivot_d[c] = mat_pivot_d[c].apply(lambda x: fmt(x) if x > 0 else "—")
-    mat_pivot_d["YoY Δ"] = mat_yoy.apply(lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—")
+    mat_pivot_d["'24→'25"] = mat_yoy.apply(lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—")
     st.dataframe(mat_pivot_d, use_container_width=True)
 
     # ══════════════════════════════════════════════════
@@ -800,7 +800,7 @@ elif view == "4 — Category Trends":
     lab_pivot_d = lab_pivot.copy()
     for c in lab_pivot_d.columns:
         lab_pivot_d[c] = lab_pivot_d[c].apply(lambda x: fmt(x) if x > 0 else "—")
-    lab_pivot_d["YoY Δ"] = lab_yoy.apply(lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—")
+    lab_pivot_d["'24→'25"] = lab_yoy.apply(lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—")
     st.dataframe(lab_pivot_d, use_container_width=True)
 
     # ══════════════════════════════════════════════════
@@ -833,13 +833,16 @@ elif view == "4 — Category Trends":
     # Narrative
     mat_share = f"{mat_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—"
     lab_share = f"{lab_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—"
+    # Dynamically compute top categories
+    top_mat_cat = mat_5yr.groupby("Budget Category")["Invoice Amount"].sum().idxmax() if len(mat_5yr) > 0 else "N/A"
+    top_lab_cat = lab_5yr.groupby("Budget Category")["Invoice Amount"].sum().idxmax() if len(lab_5yr) > 0 else "N/A"
     insight(
         f"Over the last 5 years ({TREND_YEARS[0]}–{TREND_YEARS[-1]}), Materials represent "
         f"<strong>{mat_share}</strong> of tracked spend "
         f"(<strong>{fmt(mat_per_turn)}</strong>/turn) while Labor & Services account for "
         f"<strong>{lab_share}</strong> (<strong>{fmt(lab_per_turn)}</strong>/turn). "
-        f"<strong>Supplies</strong> is the largest single materials category, and "
-        f"<strong>Labor General</strong> leads the services side."
+        f"<strong>{top_mat_cat}</strong> is the largest single materials category, and "
+        f"<strong>{top_lab_cat}</strong> leads the services side."
     )
 
     # ══════════════════════════════════════════════════
@@ -864,8 +867,8 @@ elif view == "4 — Category Trends":
         & (flagged["count"] >= 3)
     ].copy()
     flagged["Excess"] = flagged["Invoice Amount"] - flagged["mean"]
-    flagged["Excess %"] = (flagged["Excess"] / flagged["mean"] * 100)
-    flagged["SDs Over"] = (flagged["Invoice Amount"] - flagged["mean"]) / flagged["std"]
+    flagged["Excess %"] = (flagged["Excess"] / flagged["mean"].replace(0, np.nan) * 100)
+    flagged["SDs Over"] = (flagged["Invoice Amount"] - flagged["mean"]) / flagged["std"].replace(0, np.nan)
 
     # Enrich with turn info
     turn_info = ft_turns[["Turn Key", "Property Name", "Unit Label", "Move-Out Date"]].drop_duplicates("Turn Key")
@@ -1573,21 +1576,20 @@ elif view == "1 — Executive Summary":
         if len(cat24_turns) >= 5 and len(cat25_turns) >= 5:
             avg24, avg25 = cat24_turns.mean(), cat25_turns.mean()
             chg = ((avg25 - avg24) / avg24) * 100 if avg24 > 0 else 0
-            if chg > 25:
+            if chg > 25 and (avg25 - avg24) > 100:
                 risk_items.append({
                     "Risk": "Category Inflation",
                     "Detail": f"{cat_name}: avg per-turn spend up {chg:.0f}% YoY ({fmt(avg24)} → {fmt(avg25)})",
                     "Severity": "High" if chg > 50 else "Medium",
                 })
 
-    # 4. High-frequency units (>4 turns all-time)
-    all_turns_count = build_turn_summary(_df_all)
-    freq_units = all_turns_count.groupby(["Property Name", "Unit Label"]).size().reset_index(name="turns")
+    # 4. High-frequency units (>4 Full Turns all-time)
+    freq_units = ft_turns.groupby(["Property Name", "Unit Label"])["Turn Key"].nunique().reset_index(name="turns")
     chronic = freq_units[freq_units["turns"] >= 5]
     if len(chronic) > 0:
         risk_items.append({
             "Risk": "Chronic Vacancy",
-            "Detail": f"{len(chronic)} units with 5+ turns — potential workmanship or tenant screening issues",
+            "Detail": f"{len(chronic)} units with 5+ Full Turns — potential workmanship or tenant screening issues",
             "Severity": "Medium",
         })
 
