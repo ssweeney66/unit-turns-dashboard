@@ -197,6 +197,60 @@ def footer():
     )
 
 
+def render_category_table(title, categories, data, years=None, year_labels=None):
+    """Render a pivot table for a set of budget categories with YoY change column.
+
+    Parameters
+    ----------
+    title : str – section title
+    categories : list – budget category names to include
+    data : DataFrame – must have columns: Budget Category, Year, avg_per_turn
+    years : list[int] – year columns (default EXPENSE_YEARS)
+    year_labels : list[str] – display labels for year columns (default EXPENSE_YEAR_LABELS)
+    """
+    if years is None:
+        years = EXPENSE_YEARS
+    if year_labels is None:
+        year_labels = EXPENSE_YEAR_LABELS
+
+    st.markdown(f"**{title}**")
+    subset = data[data["Budget Category"].isin(categories)]
+    if len(subset) == 0:
+        st.info(f"No data for {title.split(' (')[0]} categories.")
+        return
+    pivot = subset.pivot_table(
+        index="Budget Category", columns="Year",
+        values="avg_per_turn", fill_value=0
+    ).reindex(columns=years, fill_value=0)
+    pivot = pivot.reindex([c for c in categories if c in pivot.index])
+    pivot = pivot.fillna(0)
+    if len(pivot) == 0:
+        st.info(f"No data for {title.split(' (')[0]} categories.")
+        return
+    pivot = pivot.loc[pivot.sum(axis=1) > 0]
+    if len(pivot) == 0:
+        st.info(f"No data for {title.split(' (')[0]} categories.")
+        return
+    # Add Total row
+    pivot.loc["Total"] = pivot.sum()
+    # Compute YoY change (last two years in the years list)
+    if len(years) >= 2:
+        yoy = pivot[years[-1]] / pivot[years[-2]].replace(0, np.nan) - 1
+        yoy_label = f"'{str(years[-2])[-2:]}→'{str(years[-1])[-2:]}"
+    else:
+        yoy = pd.Series(np.nan, index=pivot.index)
+        yoy_label = "YoY"
+    # Format
+    pivot_display = pivot.copy()
+    pivot_display.columns = year_labels
+    for col in pivot_display.columns:
+        pivot_display[col] = pivot_display[col].apply(fmt)
+    pivot_display[yoy_label] = yoy.apply(
+        lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
+    )
+    st.dataframe(pivot_display, use_container_width=True)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DATA LOADING
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -283,10 +337,8 @@ view = st.sidebar.radio("View", [
     "2 — Portfolio Overview",
     "3 — Property Summary",
     "4 — Category Trends",
-    "5 — Recent Turns Audit",
-    "6 — Unit Search",
-    "7 — Anomaly Detection",
-    "8 — Data Review LLM",
+    "5 — Unit Search",
+    "6 — Data Review LLM",
 ])
 
 st.sidebar.markdown("---")
@@ -518,40 +570,6 @@ if view == "3 — Property Summary":
         lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
     )
 
-    def render_category_table(title, categories, data):
-        """Render a pivot table for a set of budget categories with YoY Δ."""
-        st.markdown(f"**{title}**")
-        subset = data[data["Budget Category"].isin(categories)]
-        if len(subset) == 0:
-            st.info(f"No data for {title.split(' (')[0]} categories.")
-            return
-        pivot = subset.pivot_table(
-            index="Budget Category", columns="Year",
-            values="avg_per_turn", fill_value=0
-        ).reindex(columns=EXPENSE_YEARS, fill_value=0)
-        pivot = pivot.reindex([c for c in categories if c in pivot.index])
-        pivot = pivot.fillna(0)
-        if len(pivot) == 0:
-            st.info(f"No data for {title.split(' (')[0]} categories.")
-            return
-        pivot = pivot.loc[pivot.sum(axis=1) > 0]
-        if len(pivot) == 0:
-            st.info(f"No data for {title.split(' (')[0]} categories.")
-            return
-        # Add Total row
-        pivot.loc["Total"] = pivot.sum()
-        # Compute YoY Δ (latest full year vs prior)
-        yoy = pivot[EXPENSE_YEARS[-2]] / pivot[EXPENSE_YEARS[-3]].replace(0, np.nan) - 1
-        # Format
-        pivot_display = pivot.copy()
-        pivot_display.columns = EXPENSE_YEAR_LABELS
-        for col in pivot_display.columns:
-            pivot_display[col] = pivot_display[col].apply(fmt)
-        pivot_display["'24→'25"] = yoy.apply(
-            lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
-        )
-        st.dataframe(pivot_display, use_container_width=True)
-
     render_category_table("Core Labor (Avg per Turn)", CORE_LABOR, cat_year_spend)
     st.markdown("")
     render_category_table("Core Materials (Avg per Turn)", CORE_MATERIALS, cat_year_spend)
@@ -671,185 +689,133 @@ elif view == "2 — Portfolio Overview":
         count_matrix = count_matrix.astype(int)
         st.dataframe(count_matrix, use_container_width=True, height=560)
 
-    # Bar chart comparison
-    section("Avg Full Turn Cost by Property — Most Recent Year (2025)")
-
-    data_25 = ft_turns[ft_turns["Year"] == 2025]
-    if len(data_25) > 0:
-        prop_25 = data_25.groupby("Property Name")["total_cost"].mean().reset_index()
-        prop_25 = prop_25.sort_values("total_cost", ascending=True)
-        fig = px.bar(
-            prop_25, y="Property Name", x="total_cost", orientation="h",
-            text=prop_25["total_cost"].apply(fmt),
-            template=CHART_TEMPLATE, color_discrete_sequence=["#2563eb"],
-            labels={"total_cost": "Avg Full Turn Cost ($)", "Property Name": ""},
-        )
-        fig.update_traces(textposition="outside")
-        portfolio_avg_25 = data_25["total_cost"].mean()
-        fig.add_vline(x=portfolio_avg_25, line_dash="dash", line_color="#dc2626",
-                       annotation_text=f"Portfolio Avg: {fmt(portfolio_avg_25)}",
-                       annotation_position="top right")
-        fig.update_layout(margin=dict(t=30, b=10, l=10, r=80), height=450)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No 2025 data available.")
-
     footer()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 4: CATEGORY TRENDS (Last 5 Years)
+# VIEW 4: CATEGORY TRENDS (Portfolio-Wide)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "4 — Category Trends":
-    banner("Category Cost Trends", f"5-year trend ({TREND_YEARS[0]}–{TREND_YEARS[-1]}) — Materials and Labor analyzed separately per Full Turn")
+    banner("Category Cost Trends",
+           f"Portfolio-wide budget category analysis — {TREND_YEARS[0]} through {TREND_YEARS[-1]}")
 
+    # ── Data prep (portfolio-wide, TREND_YEARS) ──
     ft_trend = ft_lines[ft_lines["Year"].isin(TREND_YEARS)].copy()
-    ft_all = ft_lines.copy()  # Keep all years for outlier detection
-    turns_year = ft_turns[ft_turns["Year"].isin(TREND_YEARS)].groupby("Year").size().reset_index(name="turns")
-
-    # Compute avg cost per category per turn per year (all raw categories)
-    cat_year_all = ft_trend.groupby(["Budget Category", "Year"])["Invoice Amount"].sum().reset_index()
-    cat_year_all = cat_year_all.merge(turns_year, on="Year")
-    cat_year_all["Avg Per Turn"] = cat_year_all["Invoice Amount"] / cat_year_all["turns"]
-
-    # Materials vs Labor totals (5-year window)
-    mat_5yr = ft_trend[ft_trend["Budget Category"].isin(MATERIALS_CATS)]
-    lab_5yr = ft_trend[ft_trend["Budget Category"].isin(LABOR_CATS)]
-    mat_total = mat_5yr["Invoice Amount"].sum()
-    lab_total = lab_5yr["Invoice Amount"].sum()
-    total_5yr = mat_total + lab_total
-
+    trend_turn_counts = (
+        ft_turns[ft_turns["Year"].isin(TREND_YEARS)]
+        .groupby("Year")["Turn Key"].nunique()
+        .reindex(TREND_YEARS, fill_value=0)
+    )
     n_turns_total = ft_turns[ft_turns["Year"].isin(TREND_YEARS)]["Turn Key"].nunique()
-    mat_per_turn = mat_total / n_turns_total if n_turns_total > 0 else 0
-    lab_per_turn = lab_total / n_turns_total if n_turns_total > 0 else 0
+    total_spend_5yr = ft_trend["Invoice Amount"].sum()
+    avg_per_turn_overall = total_spend_5yr / n_turns_total if n_turns_total > 0 else 0
 
-    # KPIs
+    mat_spend = ft_trend[ft_trend["Budget Category"].isin(MATERIALS_CATS)]["Invoice Amount"].sum()
+    lab_spend = ft_trend[ft_trend["Budget Category"].isin(LABOR_CATS)]["Invoice Amount"].sum()
+    mat_per_turn = mat_spend / n_turns_total if n_turns_total > 0 else 0
+    lab_per_turn = lab_spend / n_turns_total if n_turns_total > 0 else 0
+
+    # Cost-type level aggregation
+    ct_year_spend = (
+        ft_trend.groupby(["Cost Type", "Year"])["Invoice Amount"]
+        .sum().reset_index(name="total_spend")
+    )
+    ct_year_spend["n_turns"] = ct_year_spend["Year"].map(trend_turn_counts).fillna(0)
+    ct_year_spend["avg_per_turn"] = ct_year_spend.apply(
+        lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
+    )
+
+    # Budget-category level aggregation
+    cat_year_spend = (
+        ft_trend.groupby(["Budget Category", "Year"])["Invoice Amount"]
+        .sum().reset_index(name="total_spend")
+    )
+    cat_year_spend["n_turns"] = cat_year_spend["Year"].map(trend_turn_counts).fillna(0)
+    cat_year_spend["avg_per_turn"] = cat_year_spend.apply(
+        lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
+    )
+
+    # YoY change on total avg cost per turn
+    avg_2024 = ct_year_spend[ct_year_spend["Year"] == 2024]["avg_per_turn"].sum()
+    avg_2025 = ct_year_spend[ct_year_spend["Year"] == 2025]["avg_per_turn"].sum()
+    yoy_total = ((avg_2025 - avg_2024) / avg_2024 * 100) if avg_2024 > 0 else np.nan
+
+    # ── KPIs ──
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Materials / Turn", fmt(mat_per_turn))
-    c2.metric("Labor / Turn", fmt(lab_per_turn))
-    c3.metric("Materials Share", f"{mat_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—")
-    c4.metric("Labor Share", f"{lab_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—")
-    c5.metric("Budget Categories", f"{len(MATERIALS_CATS) + len(LABOR_CATS)}")
+    c1.metric("Avg Cost / Turn", fmt(avg_per_turn_overall),
+              (pct(yoy_total) + " YoY") if pd.notna(yoy_total) else None)
+    c2.metric("Materials / Turn", fmt(mat_per_turn))
+    c3.metric("Labor / Turn", fmt(lab_per_turn))
+    c4.metric("Total Turns (5-Yr)", f"{n_turns_total:,}")
+    c5.metric("Total Spend (5-Yr)", fmt(total_spend_5yr))
 
     # ══════════════════════════════════════════════════
-    # MATERIALS CHART
+    # COST TYPE TREND BY YEAR (table + stacked bar)
     # ══════════════════════════════════════════════════
-    section("Materials — Avg Cost per Full Turn by Category")
+    section("Cost Type Trend by Year — Portfolio")
 
-    mat_data = cat_year_all[cat_year_all["Budget Category"].isin(MATERIALS_CATS)]
-    fig_mat = go.Figure()
-    for cat in MATERIALS_CATS:
-        subset = mat_data[mat_data["Budget Category"] == cat].sort_values("Year")
-        if len(subset) > 0:
-            fig_mat.add_trace(go.Scatter(
-                x=subset["Year"], y=subset["Avg Per Turn"],
-                name=cat, mode="lines+markers",
-                line=dict(color=MAT_COLORS.get(cat, "#94a3b8"), width=2.5),
-                marker=dict(size=7),
-                hovertemplate=f"{cat}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
+    TREND_YEAR_LABELS = [str(y) for y in TREND_YEARS]
+
+    ct_trend_pivot = ct_year_spend.pivot_table(
+        index="Cost Type", columns="Year",
+        values="avg_per_turn", fill_value=0
+    ).reindex(columns=TREND_YEARS, fill_value=0).reindex(COST_TYPES)
+    ct_trend_pivot = ct_trend_pivot.fillna(0)
+    ct_trend_pivot.loc["Total"] = ct_trend_pivot.sum()
+
+    col1, col2 = st.columns([2, 3])
+    with col1:
+        ct_display = ct_trend_pivot.copy()
+        yoy_ct = ct_trend_pivot[TREND_YEARS[-1]] / ct_trend_pivot[TREND_YEARS[-2]].replace(0, np.nan) - 1
+        ct_display.columns = TREND_YEAR_LABELS
+        for col in ct_display.columns:
+            ct_display[col] = ct_display[col].apply(fmt)
+        ct_display["'24→'25"] = yoy_ct.apply(
+            lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
+        )
+        st.dataframe(ct_display, use_container_width=True)
+
+    with col2:
+        fig_ct = go.Figure()
+        for ct in COST_TYPES:
+            row = ct_trend_pivot.loc[ct] if ct in ct_trend_pivot.index else pd.Series(0, index=TREND_YEARS)
+            fig_ct.add_trace(go.Bar(
+                x=TREND_YEAR_LABELS,
+                y=[row.get(y, 0) for y in TREND_YEARS],
+                name=ct,
+                marker_color=COST_TYPE_COLORS.get(ct, "#94a3b8"),
+                hovertemplate=f"{ct}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
             ))
-    fig_mat.update_layout(
-        template=CHART_TEMPLATE,
-        xaxis=dict(dtick=1, title=""), yaxis=dict(title="Avg Cost per Full Turn ($)", gridcolor="#f1f5f9"),
-        legend=dict(orientation="h", yanchor="top", y=-0.12, font=dict(size=11)),
-        margin=dict(t=10, b=80), height=420, hovermode="x unified",
-    )
-    st.plotly_chart(fig_mat, use_container_width=True)
-
-    # Materials data table with YoY % change
-    mat_pivot = cat_year_all[cat_year_all["Budget Category"].isin(MATERIALS_CATS)].pivot_table(
-        index="Budget Category", columns="Year", values="Avg Per Turn", fill_value=0
-    ).reindex(columns=TREND_YEARS, fill_value=0).reindex(MATERIALS_CATS)
-    mat_yoy = mat_pivot[TREND_YEARS[-1]] / mat_pivot[TREND_YEARS[-2]].replace(0, np.nan) - 1
-    mat_pivot_d = mat_pivot.copy()
-    for c in mat_pivot_d.columns:
-        mat_pivot_d[c] = mat_pivot_d[c].apply(lambda x: fmt(x) if x > 0 else "—")
-    mat_pivot_d["'24→'25"] = mat_yoy.apply(lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—")
-    st.dataframe(mat_pivot_d, use_container_width=True)
+        fig_ct.update_layout(
+            template=CHART_TEMPLATE, barmode="stack",
+            xaxis=dict(title=""), yaxis=dict(title="Avg Cost per Turn ($)"),
+            legend=dict(orientation="h", y=-0.15, font=dict(size=11)),
+            margin=dict(t=10, b=50, l=10, r=10), height=340,
+        )
+        st.plotly_chart(fig_ct, use_container_width=True)
 
     # ══════════════════════════════════════════════════
-    # LABOR CHART
+    # EXPENSE ANALYSIS BY BUDGET CATEGORY
     # ══════════════════════════════════════════════════
-    section("Labor & Services — Avg Cost per Full Turn by Category")
+    section("Expense Analysis by Budget Category — Portfolio")
+    st.caption(f"Average cost per Full Turn by budget category ({TREND_YEARS[0]}–{TREND_YEARS[-1]})")
 
-    lab_data = cat_year_all[cat_year_all["Budget Category"].isin(LABOR_CATS)]
-    fig_lab = go.Figure()
-    for cat in LABOR_CATS:
-        subset = lab_data[lab_data["Budget Category"] == cat].sort_values("Year")
-        if len(subset) > 0:
-            fig_lab.add_trace(go.Scatter(
-                x=subset["Year"], y=subset["Avg Per Turn"],
-                name=cat, mode="lines+markers",
-                line=dict(color=LAB_COLORS.get(cat, "#94a3b8"), width=2.5),
-                marker=dict(size=7),
-                hovertemplate=f"{cat}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
-            ))
-    fig_lab.update_layout(
-        template=CHART_TEMPLATE,
-        xaxis=dict(dtick=1, title=""), yaxis=dict(title="Avg Cost per Full Turn ($)", gridcolor="#f1f5f9"),
-        legend=dict(orientation="h", yanchor="top", y=-0.12, font=dict(size=11)),
-        margin=dict(t=10, b=80), height=420, hovermode="x unified",
-    )
-    st.plotly_chart(fig_lab, use_container_width=True)
-
-    # Labor data table with YoY % change
-    lab_pivot = cat_year_all[cat_year_all["Budget Category"].isin(LABOR_CATS)].pivot_table(
-        index="Budget Category", columns="Year", values="Avg Per Turn", fill_value=0
-    ).reindex(columns=TREND_YEARS, fill_value=0).reindex(LABOR_CATS)
-    lab_yoy = lab_pivot[TREND_YEARS[-1]] / lab_pivot[TREND_YEARS[-2]].replace(0, np.nan) - 1
-    lab_pivot_d = lab_pivot.copy()
-    for c in lab_pivot_d.columns:
-        lab_pivot_d[c] = lab_pivot_d[c].apply(lambda x: fmt(x) if x > 0 else "—")
-    lab_pivot_d["'24→'25"] = lab_yoy.apply(lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—")
-    st.dataframe(lab_pivot_d, use_container_width=True)
+    render_category_table("Core Labor (Avg per Turn)", CORE_LABOR, cat_year_spend,
+                          years=TREND_YEARS, year_labels=TREND_YEAR_LABELS)
+    st.markdown("")
+    render_category_table("Core Materials (Avg per Turn)", CORE_MATERIALS, cat_year_spend,
+                          years=TREND_YEARS, year_labels=TREND_YEAR_LABELS)
+    st.markdown("")
+    render_category_table("Other Categories (Avg per Turn)", OTHER_CATS, cat_year_spend,
+                          years=TREND_YEARS, year_labels=TREND_YEAR_LABELS)
 
     # ══════════════════════════════════════════════════
-    # COMBINED STACKED VIEW
+    # CATEGORY OUTLIERS — LAST 12 MONTHS
     # ══════════════════════════════════════════════════
-    section("Materials vs Labor — Total Spend Split by Year")
+    section("Category Outliers — Last 12 Months")
+    st.caption("Per-property category spend exceeding mean + 1.5 standard deviations on recent Full Turns.")
 
-    mat_by_yr = mat_5yr.groupby("Year")["Invoice Amount"].sum().reindex(TREND_YEARS, fill_value=0)
-    lab_by_yr = lab_5yr.groupby("Year")["Invoice Amount"].sum().reindex(TREND_YEARS, fill_value=0)
-
-    fig_stack = go.Figure()
-    fig_stack.add_trace(go.Bar(
-        x=[str(y) for y in TREND_YEARS], y=mat_by_yr.values,
-        name="Materials", marker_color="#2563eb",
-        hovertemplate="Materials: $%{y:,.0f}<extra></extra>",
-    ))
-    fig_stack.add_trace(go.Bar(
-        x=[str(y) for y in TREND_YEARS], y=lab_by_yr.values,
-        name="Labor & Services", marker_color="#f59e0b",
-        hovertemplate="Labor: $%{y:,.0f}<extra></extra>",
-    ))
-    fig_stack.update_layout(
-        template=CHART_TEMPLATE, barmode="stack",
-        xaxis=dict(title=""), yaxis=dict(title="Total Spend ($)"),
-        legend=dict(orientation="h", y=-0.12, font=dict(size=12)),
-        margin=dict(t=10, b=50), height=380,
-    )
-    st.plotly_chart(fig_stack, use_container_width=True)
-
-    # Narrative
-    mat_share = f"{mat_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—"
-    lab_share = f"{lab_total/total_5yr*100:.0f}%" if total_5yr > 0 else "—"
-    # Dynamically compute top categories
-    top_mat_cat = mat_5yr.groupby("Budget Category")["Invoice Amount"].sum().idxmax() if len(mat_5yr) > 0 else "N/A"
-    top_lab_cat = lab_5yr.groupby("Budget Category")["Invoice Amount"].sum().idxmax() if len(lab_5yr) > 0 else "N/A"
-    insight(
-        f"Over the last 5 years ({TREND_YEARS[0]}–{TREND_YEARS[-1]}), Materials represent "
-        f"<strong>{mat_share}</strong> of tracked spend "
-        f"(<strong>{fmt(mat_per_turn)}</strong>/turn) while Labor & Services account for "
-        f"<strong>{lab_share}</strong> (<strong>{fmt(lab_per_turn)}</strong>/turn). "
-        f"<strong>{top_mat_cat}</strong> is the largest single materials category, and "
-        f"<strong>{top_lab_cat}</strong> leads the services side."
-    )
-
-    # ══════════════════════════════════════════════════
-    # OUTLIER DETECTION (uses ALL raw categories now)
-    # ══════════════════════════════════════════════════
-
-    # Compute per-property, per-raw-category stats (using ALL years for statistical depth)
+    ft_all = ft_lines.copy()
     prop_cat = (
         ft_all.groupby(["Property Name", "Budget Category", "Turn Key"])["Invoice Amount"]
         .sum().reset_index()
@@ -860,273 +826,77 @@ elif view == "4 — Category Trends":
     )
     prop_cat_stats["threshold"] = prop_cat_stats["mean"] + 1.5 * prop_cat_stats["std"]
 
-    # Flag outliers
     flagged = prop_cat.merge(prop_cat_stats, on=["Property Name", "Budget Category"])
     flagged = flagged[
         (flagged["Invoice Amount"] > flagged["threshold"])
         & (flagged["count"] >= 3)
     ].copy()
     flagged["Excess"] = flagged["Invoice Amount"] - flagged["mean"]
-    flagged["Excess %"] = (flagged["Excess"] / flagged["mean"].replace(0, np.nan) * 100)
-    flagged["SDs Over"] = (flagged["Invoice Amount"] - flagged["mean"]) / flagged["std"].replace(0, np.nan)
 
-    # Enrich with turn info
     turn_info = ft_turns[["Turn Key", "Property Name", "Unit Label", "Move-Out Date"]].drop_duplicates("Turn Key")
     flagged = flagged.merge(turn_info, on=["Turn Key", "Property Name"], how="left")
-
-    # ── Section A: Last 12 Months Outliers ──
-    section("Outliers — Last 12 Months")
-    st.caption("Category spend exceeding property mean + 1.5σ on Full Turns completed in the past 12 months.")
 
     cutoff_12m = pd.Timestamp.now() - pd.DateOffset(months=12)
     recent_outliers = flagged[flagged["Move-Out Date"] >= cutoff_12m].sort_values("Excess", ascending=False).copy()
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Outliers (Last 12 Mo)", len(recent_outliers))
-    c2.metric("Total Excess Spend", fmt(recent_outliers["Excess"].sum()) if len(recent_outliers) else "—")
-    top_cat_recent = recent_outliers.groupby("Budget Category")["Excess"].sum().idxmax() if len(recent_outliers) else "—"
-    c3.metric("Top Flagged Category", top_cat_recent)
+    c1.metric("Outlier Flags", len(recent_outliers))
+    c2.metric("Total Excess Spend", fmt(recent_outliers["Excess"].sum()) if len(recent_outliers) else "$0")
+    top_cat = recent_outliers.groupby("Budget Category")["Excess"].sum().idxmax() if len(recent_outliers) else "None"
+    c3.metric("Top Flagged Category", top_cat)
 
     if len(recent_outliers) > 0:
         r_display = recent_outliers[[
             "Property Name", "Unit Label", "Move-Out Date", "Budget Category",
-            "Invoice Amount", "mean", "Excess", "Excess %", "SDs Over"
+            "Invoice Amount", "mean", "Excess"
         ]].copy()
         r_display["Move-Out Date"] = r_display["Move-Out Date"].dt.strftime("%b %d, %Y")
         r_display["Invoice Amount"] = r_display["Invoice Amount"].apply(fmt)
         r_display["mean"] = r_display["mean"].apply(fmt)
         r_display["Excess"] = r_display["Excess"].apply(fmt)
-        r_display["Excess %"] = r_display["Excess %"].apply(lambda x: f"+{x:.0f}%" if pd.notna(x) and np.isfinite(x) else "—")
-        r_display["SDs Over"] = r_display["SDs Over"].apply(lambda x: f"{x:.1f}σ" if pd.notna(x) and np.isfinite(x) else "—")
         r_display.columns = ["Property", "Unit", "Move-Out", "Category",
-                              "Actual Spend", "Property Avg", "Excess ($)", "Excess (%)", "Std Devs Over"]
-        st.dataframe(r_display, use_container_width=True, hide_index=True, height=min(400, 60 + len(recent_outliers) * 35))
-
-        worst = recent_outliers.iloc[0]
-        insight(
-            f"Highest recent outlier: <strong>{worst['Budget Category']}</strong> at "
-            f"<strong>{worst['Property Name']}</strong> (Unit {worst['Unit Label']}) — "
-            f"spent <strong>{fmt(worst['Invoice Amount'])}</strong> vs property avg of "
-            f"<strong>{fmt(worst['mean'])}</strong>, exceeding by <strong>{fmt(worst['Excess'])}</strong>."
-        )
+                              "Actual", "Property Avg", "Excess"]
+        st.dataframe(r_display, use_container_width=True, hide_index=True,
+                     height=min(400, 60 + len(recent_outliers) * 35))
     else:
         st.success("No category outliers detected in the past 12 months.")
 
-    # ── Section B: All-Time Historical Outliers ──
-    section("Historical Outliers — All Time (Highest Excess First)")
-    st.caption("All flagged category overspends across the full dataset, ranked by dollar excess over property average.")
+    # ══════════════════════════════════════════════════
+    # NARRATIVE INSIGHT
+    # ══════════════════════════════════════════════════
+    mat_share = f"{mat_spend / total_spend_5yr * 100:.0f}%" if total_spend_5yr > 0 else "—"
+    lab_share = f"{lab_spend / total_spend_5yr * 100:.0f}%" if total_spend_5yr > 0 else "—"
 
-    historical_outliers = flagged.sort_values("Excess", ascending=False).copy()
+    cat_2024 = cat_year_spend[cat_year_spend["Year"] == 2024].set_index("Budget Category")["avg_per_turn"]
+    cat_2025 = cat_year_spend[cat_year_spend["Year"] == 2025].set_index("Budget Category")["avg_per_turn"]
+    cat_delta = (cat_2025 - cat_2024).dropna().sort_values()
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Historical Outliers", len(historical_outliers))
-    c2.metric("Cumulative Excess", fmt(historical_outliers["Excess"].sum()) if len(historical_outliers) else "—")
-    top_prop = historical_outliers.groupby("Property Name")["Excess"].sum().idxmax() if len(historical_outliers) else "—"
-    c3.metric("Most Flagged Property", top_prop)
-
-    if len(historical_outliers) > 0:
-        h_display = historical_outliers[[
-            "Property Name", "Unit Label", "Move-Out Date", "Budget Category",
-            "Invoice Amount", "mean", "Excess", "Excess %", "SDs Over"
-        ]].copy()
-        h_display["Move-Out Date"] = h_display["Move-Out Date"].dt.strftime("%b %d, %Y")
-        h_display["Invoice Amount"] = h_display["Invoice Amount"].apply(fmt)
-        h_display["mean"] = h_display["mean"].apply(fmt)
-        h_display["Excess"] = h_display["Excess"].apply(fmt)
-        h_display["Excess %"] = h_display["Excess %"].apply(lambda x: f"+{x:.0f}%" if pd.notna(x) and np.isfinite(x) else "—")
-        h_display["SDs Over"] = h_display["SDs Over"].apply(lambda x: f"{x:.1f}σ" if pd.notna(x) and np.isfinite(x) else "—")
-        h_display.columns = ["Property", "Unit", "Move-Out", "Category",
-                              "Actual Spend", "Property Avg", "Excess ($)", "Excess (%)", "Std Devs Over"]
-        st.dataframe(h_display, use_container_width=True, hide_index=True, height=500)
-
-        # Which categories flag most
-        all_cat_colors = {**MAT_COLORS, **LAB_COLORS}
-        cat_flags = historical_outliers.groupby("Budget Category").agg(
-            Flags=("Turn Key", "count"),
-            Total_Excess=("Excess", "sum"),
-        ).reset_index().sort_values("Total_Excess", ascending=False)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            fig_flags = px.bar(
-                cat_flags, x="Budget Category", y="Flags", text="Flags",
-                template=CHART_TEMPLATE, color="Budget Category",
-                color_discrete_map=all_cat_colors,
-            )
-            fig_flags.update_traces(textposition="outside")
-            fig_flags.update_layout(margin=dict(t=10, b=60), height=340, showlegend=False,
-                                    xaxis_title="", yaxis_title="Outlier Count", xaxis_tickangle=-45,
-                                    title=dict(text="Outlier Frequency by Category", font=dict(size=13)))
-            st.plotly_chart(fig_flags, use_container_width=True)
-
-        with col2:
-            fig_excess = px.bar(
-                cat_flags, x="Budget Category", y="Total_Excess",
-                text=cat_flags["Total_Excess"].apply(fmt),
-                template=CHART_TEMPLATE, color="Budget Category",
-                color_discrete_map=all_cat_colors,
-            )
-            fig_excess.update_traces(textposition="outside")
-            fig_excess.update_layout(margin=dict(t=10, b=60), height=340, showlegend=False,
-                                     xaxis_title="", yaxis_title="Total Excess ($)", xaxis_tickangle=-45,
-                                     title=dict(text="Cumulative Excess by Category", font=dict(size=13)))
-            st.plotly_chart(fig_excess, use_container_width=True)
-
-        # Property breakdown
-        prop_flags = historical_outliers.groupby("Property Name").agg(
-            Flags=("Turn Key", "count"),
-            Excess=("Excess", "sum"),
-        ).reset_index().sort_values("Excess", ascending=False)
-        fig_prop = px.bar(
-            prop_flags, x="Excess", y="Property Name", orientation="h",
-            text=prop_flags["Excess"].apply(fmt),
-            template=CHART_TEMPLATE, color_discrete_sequence=["#dc2626"],
+    insight_parts = [
+        f"Across the portfolio ({TREND_YEARS[0]}–{TREND_YEARS[-1]}), "
+        f"Materials represent <strong>{mat_share}</strong> of tracked spend "
+        f"(<strong>{fmt(mat_per_turn)}</strong>/turn) while Labor accounts for "
+        f"<strong>{lab_share}</strong> (<strong>{fmt(lab_per_turn)}</strong>/turn).",
+    ]
+    if len(cat_delta) > 0 and cat_delta.iloc[-1] > 0:
+        insight_parts.append(
+            f"<strong>{cat_delta.index[-1]}</strong> saw the largest per-turn cost increase "
+            f"year-over-year (<strong>+{fmt(cat_delta.iloc[-1])}</strong>)."
         )
-        fig_prop.update_traces(textposition="outside")
-        fig_prop.update_layout(margin=dict(t=10, b=10, r=80), height=400, showlegend=False,
-                                xaxis_title="Total Excess Spend ($)", yaxis_title="",
-                                yaxis=dict(autorange="reversed"),
-                                title=dict(text="Excess Spend by Property", font=dict(size=13)))
-        st.plotly_chart(fig_prop, use_container_width=True)
-    else:
-        st.success("No outliers detected across tracked categories.")
+    if len(cat_delta) > 0 and cat_delta.iloc[0] < 0:
+        insight_parts.append(
+            f"<strong>{cat_delta.index[0]}</strong> declined by "
+            f"<strong>{fmt(abs(cat_delta.iloc[0]))}</strong>/turn."
+        )
+
+    insight(" ".join(insight_parts))
 
     footer()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 5: RECENT TURNS AUDIT
+# VIEW 5: UNIT SEARCH
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "5 — Recent Turns Audit":
-    banner("Recent 10 Full Turn Audit",
-           "Detailed cost breakdown of the 10 most recent Full Turns — benchmarked against the portfolio average")
-
-    recent_10 = ft_turns.sort_values("completion_date", ascending=False).head(10).copy()
-
-    # Portfolio-wide avg per category per turn (all years)
-    ft_audit = ft_lines[ft_lines["Year"].isin(YEARS)].copy()
-    total_turns_audit = ft_turns[ft_turns["Year"].isin(YEARS)]["Turn Key"].nunique()
-
-    portfolio_cat_avg = (
-        ft_audit.groupby("Budget Category")["Invoice Amount"].sum() / total_turns_audit
-    ).reset_index()
-    portfolio_cat_avg.columns = ["Budget Category", "Portfolio Avg"]
-
-    # Summary table
-    section("Overview — 10 Most Recent Full Turns")
-
-    r10_display = recent_10.copy()
-    r10_display["#"] = range(1, len(recent_10) + 1)
-    r10_display["Completion"] = r10_display["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
-    r10_display["Move-Out"] = r10_display["Move-Out Date"].dt.strftime("%b %d, %Y")
-    r10_display["Cost"] = r10_display["total_cost"].apply(fmt)
-    r10_display["Dur"] = r10_display["Duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
-
-    # Portfolio avg for context
-    port_avg = ft_turns[ft_turns["Year"].isin(YEARS)]["total_cost"].mean()
-    r10_display["vs Portfolio Avg"] = r10_display["total_cost"].apply(
-        lambda x: pct((x - port_avg) / port_avg * 100)
-    )
-
-    overview = r10_display[["#", "Property Name", "Unit Label", "Floor Plan",
-                             "Move-Out", "Completion", "Cost", "vs Portfolio Avg",
-                             "Dur", "line_items"]].copy()
-    overview.columns = ["#", "Property", "Unit", "Floor Plan", "Move-Out",
-                         "Completion", "Total Cost", "vs Portfolio Avg",
-                         "Duration", "Invoices"]
-    st.dataframe(overview, use_container_width=True, hide_index=True)
-
-    insight(
-        f"Portfolio average Full Turn cost: <strong>{fmt(port_avg)}</strong>. "
-        f"Values in the 'vs Portfolio Avg' column show how each recent turn compares. "
-        f"Expand any turn below to see line-item detail benchmarked against portfolio norms."
-    )
-
-    # ── Detailed Breakdown per Turn ──
-    section("Line-Item Breakdown with Portfolio Benchmarks")
-
-    for idx, (_, turn) in enumerate(recent_10.iterrows()):
-        label = (
-            f"**{idx+1}. {turn['Property Name']}** — Unit {turn['Unit Label']} — "
-            f"{fmt(turn['total_cost'])} — {turn['Move-Out Date'].strftime('%b %d, %Y')}"
-        )
-        with st.expander(label, expanded=(idx == 0)):
-            # Get line items
-            items = ft_lines[ft_lines["Turn Key"] == turn["Turn Key"]].copy()
-
-            # Aggregate by category
-            cat_agg = (
-                items.groupby("Budget Category")["Invoice Amount"]
-                .sum().reset_index()
-                .sort_values("Invoice Amount", ascending=False)
-            )
-            cat_agg = cat_agg.merge(portfolio_cat_avg, on="Budget Category", how="left")
-            cat_agg["Portfolio Avg"] = cat_agg["Portfolio Avg"].fillna(0)
-            cat_agg["Variance"] = cat_agg["Invoice Amount"] - cat_agg["Portfolio Avg"]
-            cat_agg["Var %"] = cat_agg.apply(
-                lambda r: ((r["Variance"]) / r["Portfolio Avg"] * 100)
-                if r["Portfolio Avg"] > 0 else np.nan, axis=1
-            )
-
-            # Display
-            cat_display = cat_agg.copy()
-            cat_display["Invoice Amount"] = cat_display["Invoice Amount"].apply(fmt)
-            cat_display["Portfolio Avg"] = cat_display["Portfolio Avg"].apply(fmt)
-            cat_display["Variance"] = cat_display["Variance"].apply(fmt)
-            cat_display["Var %"] = cat_display["Var %"].apply(lambda x: pct(x) if pd.notna(x) else "—")
-            cat_display.columns = ["Category", "This Turn", "Portfolio Avg", "Variance ($)", "Variance (%)"]
-            st.dataframe(cat_display, use_container_width=True, hide_index=True)
-
-            # Horizontal bar comparing this turn vs portfolio
-            col1, col2 = st.columns([3, 2])
-            with col1:
-                top_cats = cat_agg.head(8)
-                fig_cmp = go.Figure()
-                fig_cmp.add_trace(go.Bar(
-                    y=top_cats["Budget Category"], x=top_cats["Invoice Amount"],
-                    name="This Turn", orientation="h",
-                    marker_color="#2563eb", opacity=0.9,
-                ))
-                fig_cmp.add_trace(go.Bar(
-                    y=top_cats["Budget Category"], x=top_cats["Portfolio Avg"],
-                    name="Portfolio Avg", orientation="h",
-                    marker_color="#94a3b8", opacity=0.6,
-                ))
-                fig_cmp.update_layout(
-                    template=CHART_TEMPLATE, barmode="group",
-                    legend=dict(orientation="h", y=-0.15, font=dict(size=11)),
-                    margin=dict(t=10, b=50, l=10, r=10), height=280,
-                    xaxis_title="Cost ($)", yaxis=dict(autorange="reversed"),
-                )
-                st.plotly_chart(fig_cmp, use_container_width=True)
-
-            with col2:
-                st.markdown("**Turn Summary**")
-                st.markdown(f"- **Total Cost:** {fmt(turn['total_cost'])}")
-                st.markdown(f"- **Floor Plan:** {turn['Floor Plan']}")
-                st.markdown(f"- **Duration:** {turn['Duration']:.0f} days" if pd.notna(turn['Duration']) else "- **Duration:** —")
-                st.markdown(f"- **Invoices:** {turn['line_items']}")
-                variance_total = turn["total_cost"] - port_avg
-                vs_pct = pct(variance_total / port_avg * 100) if port_avg > 0 else "—"
-                st.markdown(f"- **vs Portfolio:** {fmt(variance_total)} ({vs_pct})")
-
-            # Raw invoice list
-            with st.expander("View All Invoices"):
-                raw = items[["Vendor Name", "Budget Category", "Invoice Amount",
-                             "Invoice Date", "Cost Type", "Line Item Notes"]].copy()
-                raw["Invoice Amount"] = raw["Invoice Amount"].apply(lambda x: fmt(x, 2))
-                raw["Invoice Date"] = raw["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
-                raw["Line Item Notes"] = raw["Line Item Notes"].fillna("")
-                raw = raw.sort_values("Invoice Date")
-                st.dataframe(raw, use_container_width=True, hide_index=True)
-
-    footer()
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 6: UNIT SEARCH
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "6 — Unit Search":
+elif view == "5 — Unit Search":
     banner("Unit Search & History", "Full renovation history for any unit in the portfolio")
 
     # Use all-types turn summary for this view
@@ -1188,96 +958,6 @@ elif view == "6 — Unit Search":
         )
         fig.update_layout(margin=dict(t=10, b=10), height=350)
         st.plotly_chart(fig, use_container_width=True)
-
-    footer()
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 7: ANOMALY DETECTION
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "7 — Anomaly Detection":
-    banner("Anomaly Detection", "Identify unusual patterns across all turn types requiring investigation")
-
-    all_turns = build_turn_summary(_df_all)
-
-    tab1, tab2, tab3 = st.tabs(["High-Frequency Units", "Cost Outliers (IQR)", "Data Quality"])
-
-    with tab1:
-        st.caption("Units with unusually high turn frequency — may indicate chronic vacancy or workmanship issues.")
-        threshold = st.slider("Minimum turn count to flag", 3, 10, 4)
-
-        unit_freq = (
-            all_turns.groupby(["Property Name", "Unit Label"])
-            .agg(turn_count=("Turn Key", "nunique"), total_spend=("total_cost", "sum"),
-                 types=("Turn Type", lambda x: ", ".join(sorted(x.unique()))))
-            .reset_index().sort_values("turn_count", ascending=False)
-        )
-        flagged = unit_freq[unit_freq["turn_count"] >= threshold]
-        st.metric("Flagged Units", len(flagged))
-
-        if len(flagged) > 0:
-            disp = flagged.copy()
-            disp["total_spend"] = disp["total_spend"].apply(fmt)
-            disp.columns = ["Property", "Unit", "Turns", "Total Spend", "Turn Types"]
-            st.dataframe(disp, use_container_width=True, hide_index=True)
-
-            fig = px.bar(
-                flagged.head(20), x="Unit Label", y="turn_count",
-                color="Property Name", text="turn_count",
-                template=CHART_TEMPLATE,
-            )
-            fig.update_traces(textposition="outside")
-            fig.update_layout(xaxis_tickangle=-45, margin=dict(t=10, b=60), height=380,
-                              xaxis_title="", yaxis_title="Turns",
-                              legend=dict(orientation="h", y=-0.25))
-            st.plotly_chart(fig, use_container_width=True)
-
-    with tab2:
-        st.caption("Turns where total cost exceeds Q3 + 1.5 × IQR for their type.")
-
-        outlier_rows = []
-        for tt in all_turns["Turn Type"].unique():
-            subset = all_turns[all_turns["Turn Type"] == tt]["total_cost"]
-            if len(subset) < 4:
-                continue
-            q1, q3 = subset.quantile(0.25), subset.quantile(0.75)
-            upper = q3 + 1.5 * (q3 - q1)
-            for _, row in all_turns[(all_turns["Turn Type"] == tt) & (all_turns["total_cost"] > upper)].iterrows():
-                outlier_rows.append({
-                    "Property": row["Property Name"], "Unit": row["Unit Label"],
-                    "Move-Out": row["Move-Out Date"].strftime("%b %d, %Y") if pd.notna(row["Move-Out Date"]) else "—",
-                    "Type": row["Turn Type"],
-                    "Cost": row["total_cost"], "Threshold": upper,
-                })
-
-        if outlier_rows:
-            odf = pd.DataFrame(outlier_rows).sort_values("Cost", ascending=False)
-            st.metric("Statistical Outliers", len(odf))
-            odf_disp = odf.copy()
-            odf_disp["Cost"] = odf_disp["Cost"].apply(fmt)
-            odf_disp["Threshold"] = odf_disp["Threshold"].apply(fmt)
-            st.dataframe(odf_disp, use_container_width=True, hide_index=True, height=400)
-        else:
-            st.success("No statistical outliers detected.")
-
-    with tab3:
-        st.caption("Data integrity checks across all records.")
-        negatives = _df_all[_df_all["Invoice Amount"] < 0]
-        missing_unit = _df_all[_df_all["Unit Number"].str.strip() == ""]
-        missing_inv = _df_all[_df_all["Invoice Number"].isna() | (_df_all["Invoice Number"].astype(str).str.strip() == "")] if "Invoice Number" in _df_all.columns else pd.DataFrame()
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Negative Invoices", len(negatives))
-        c2.metric("Missing Unit #", len(missing_unit))
-        c3.metric("Missing Invoice #", len(missing_inv))
-
-        if len(negatives) > 0:
-            st.markdown("**Negative Invoice Records:**")
-            neg_d = negatives[["Property Name", "Unit Label", "Vendor Name",
-                               "Invoice Amount", "Budget Category", "Line Item Notes"]].head(20).copy()
-            neg_d["Invoice Amount"] = neg_d["Invoice Amount"].apply(lambda x: fmt(x, 2))
-            neg_d["Line Item Notes"] = neg_d["Line Item Notes"].fillna("")
-            st.dataframe(neg_d, use_container_width=True, hide_index=True)
 
     footer()
 
@@ -1625,9 +1305,9 @@ elif view == "1 — Executive Summary":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 8: DATA REVIEW LLM
+# VIEW 6: DATA REVIEW LLM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "8 — Data Review LLM":
+elif view == "6 — Data Review LLM":
     banner("Data Review LLM", "Ask questions about your Full Turn portfolio data — powered by AI")
 
     # ── Build data context for the LLM ──
