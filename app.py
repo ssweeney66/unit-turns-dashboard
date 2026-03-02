@@ -197,8 +197,8 @@ def footer():
     )
 
 
-def render_category_table(title, categories, data, years=None, year_labels=None):
-    """Render a pivot table for a set of budget categories with YoY change column.
+def render_category_table(title, categories, data, years=None, year_labels=None, yoy_pairs=None):
+    """Render a pivot table for a set of budget categories with YoY change column(s).
 
     Parameters
     ----------
@@ -207,6 +207,8 @@ def render_category_table(title, categories, data, years=None, year_labels=None)
     data : DataFrame – must have columns: Budget Category, Year, avg_per_turn
     years : list[int] – year columns (default EXPENSE_YEARS)
     year_labels : list[str] – display labels for year columns (default EXPENSE_YEAR_LABELS)
+    yoy_pairs : list[tuple] – explicit (prior_year, current_year) pairs for YoY columns.
+                               If None, auto-generates a single column from the last two years.
     """
     if years is None:
         years = EXPENSE_YEARS
@@ -233,21 +235,30 @@ def render_category_table(title, categories, data, years=None, year_labels=None)
         return
     # Add Total row
     pivot.loc["Total"] = pivot.sum()
-    # Compute YoY change (last two years in the years list)
-    if len(years) >= 2:
-        yoy = pivot[years[-1]] / pivot[years[-2]].replace(0, np.nan) - 1
-        yoy_label = f"'{str(years[-2])[-2:]}→'{str(years[-1])[-2:]}"
-    else:
-        yoy = pd.Series(np.nan, index=pivot.index)
-        yoy_label = "YoY"
+
+    # Build YoY pairs list
+    if yoy_pairs is None and len(years) >= 2:
+        yoy_pairs = [(years[-2], years[-1])]
+    elif yoy_pairs is None:
+        yoy_pairs = []
+
+    # Compute YoY columns
+    yoy_columns = {}
+    for prior, current in yoy_pairs:
+        if prior in pivot.columns and current in pivot.columns:
+            yoy_vals = pivot[current] / pivot[prior].replace(0, np.nan) - 1
+            label = f"'{str(prior)[-2:]}→'{str(current)[-2:]}"
+            yoy_columns[label] = yoy_vals
+
     # Format
     pivot_display = pivot.copy()
     pivot_display.columns = year_labels
     for col in pivot_display.columns:
         pivot_display[col] = pivot_display[col].apply(fmt)
-    pivot_display[yoy_label] = yoy.apply(
-        lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
-    )
+    for label, yoy_vals in yoy_columns.items():
+        pivot_display[label] = yoy_vals.apply(
+            lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
+        )
     st.dataframe(pivot_display, use_container_width=True)
 
 
@@ -521,11 +532,15 @@ if view == "3 — Property Summary":
         lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
     )
 
-    render_category_table("Core Labor (Avg per Turn)", CORE_LABOR, cat_year_spend)
+    prop_yoy_pairs = [(2023, 2024), (2024, 2025), (2025, 2026)]
+    render_category_table("Core Labor (Avg per Turn)", CORE_LABOR, cat_year_spend,
+                          yoy_pairs=prop_yoy_pairs)
     st.markdown("")
-    render_category_table("Core Materials (Avg per Turn)", CORE_MATERIALS, cat_year_spend)
+    render_category_table("Core Materials (Avg per Turn)", CORE_MATERIALS, cat_year_spend,
+                          yoy_pairs=prop_yoy_pairs)
     st.markdown("")
-    render_category_table("Other Categories (Avg per Turn)", OTHER_CATS, cat_year_spend)
+    render_category_table("Other Categories (Avg per Turn)", OTHER_CATS, cat_year_spend,
+                          yoy_pairs=prop_yoy_pairs)
 
     # ══════════════════════════════════════════════════
     # NARRATIVE INSIGHT
