@@ -33,9 +33,19 @@ LABOR_CATS = [
 ]
 
 # ── Expense analysis constants ──
-EXPENSE_YEARS = [2022, 2023, 2024, 2025, 2026]
-CORE_LABOR = ["Flooring Labor", "Countertops Labor", "Cabinets Labor", "Paint", "Glaze"]
-CORE_MATERIALS = ["Flooring Materials", "Countertops Materials", "Cabinets Materials", "Appliances"]
+EXPENSE_YEARS = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+CORE_LABOR = [
+    "Flooring Labor", "Countertops Labor", "Cabinets Labor",
+    "Paint", "Glaze", "Labor General", "Management Fee",
+]
+CORE_MATERIALS = [
+    "Flooring Materials", "Countertops Materials",
+    "Cabinets Materials", "Appliances",
+]
+OTHER_CATS = [
+    "Electric General", "Plumbing", "Scrape Ceiling",
+    "Supplies", "Windows", "Powerwash and Demo",
+]
 COST_TYPE_COLORS = {
     "Materials": "#2563eb",
     "Labor":     "#f59e0b",
@@ -496,7 +506,7 @@ if view == "3 — Property Summary":
     # DETAILED EXPENSE ANALYSIS BY BUDGET CATEGORY
     # ══════════════════════════════════════════════════
     section(f"Expense Analysis by Budget Category — {fp_label}")
-    st.caption("Average cost per Full Turn by budget category (2022 – 2026 YTD)")
+    st.caption(f"Average cost per Full Turn by budget category ({EXPENSE_YEARS[0]} – {expense_year_label(EXPENSE_YEARS[-1])})")
 
     # Pre-compute: spend by budget category and year
     cat_year_spend = (
@@ -509,7 +519,7 @@ if view == "3 — Property Summary":
     )
 
     def render_category_table(title, categories, data):
-        """Render a pivot table for a set of budget categories."""
+        """Render a pivot table for a set of budget categories with YoY Δ."""
         st.markdown(f"**{title}**")
         subset = data[data["Budget Category"].isin(categories)]
         if len(subset) == 0:
@@ -519,35 +529,34 @@ if view == "3 — Property Summary":
             index="Budget Category", columns="Year",
             values="avg_per_turn", fill_value=0
         ).reindex(columns=EXPENSE_YEARS, fill_value=0)
-        # Keep only categories that exist in this property's data
         pivot = pivot.reindex([c for c in categories if c in pivot.index])
         pivot = pivot.fillna(0)
         if len(pivot) == 0:
             st.info(f"No data for {title.split(' (')[0]} categories.")
             return
-        # Remove all-zero rows
         pivot = pivot.loc[pivot.sum(axis=1) > 0]
         if len(pivot) == 0:
             st.info(f"No data for {title.split(' (')[0]} categories.")
             return
         # Add Total row
         pivot.loc["Total"] = pivot.sum()
+        # Compute YoY Δ (latest full year vs prior)
+        yoy = pivot[EXPENSE_YEARS[-2]] / pivot[EXPENSE_YEARS[-3]].replace(0, np.nan) - 1
         # Format
         pivot_display = pivot.copy()
         pivot_display.columns = EXPENSE_YEAR_LABELS
         for col in pivot_display.columns:
             pivot_display[col] = pivot_display[col].apply(fmt)
+        pivot_display["YoY Δ"] = yoy.apply(
+            lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
+        )
         st.dataframe(pivot_display, use_container_width=True)
-
-    # Determine "Other" categories (everything not Core Labor or Core Materials)
-    all_known = set(CORE_LABOR + CORE_MATERIALS)
-    other_cats = sorted(set(trend_lines["Budget Category"].dropna().unique()) - all_known)
 
     render_category_table("Core Labor (Avg per Turn)", CORE_LABOR, cat_year_spend)
     st.markdown("")
     render_category_table("Core Materials (Avg per Turn)", CORE_MATERIALS, cat_year_spend)
     st.markdown("")
-    render_category_table("Other Categories (Avg per Turn)", other_cats, cat_year_spend)
+    render_category_table("Other Categories (Avg per Turn)", OTHER_CATS, cat_year_spend)
 
     # ══════════════════════════════════════════════════
     # NARRATIVE INSIGHT
