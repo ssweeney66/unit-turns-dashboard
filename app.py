@@ -659,17 +659,24 @@ elif view == "2 — Portfolio Overview":
         st.dataframe(display, use_container_width=True, height=560)
 
         # Narrative
-        top_prop = avg_matrix.drop("PORTFOLIO AVG").sort_values("Avg (All Years)", ascending=False).index[0]
-        low_prop = avg_matrix.drop("PORTFOLIO AVG").sort_values("Avg (All Years)", ascending=True)
-        low_prop = low_prop[low_prop["Avg (All Years)"] > 0].index[0]
+        prop_only = avg_matrix.drop("PORTFOLIO AVG")
         port_avg = avg_matrix.loc["PORTFOLIO AVG", "Avg (All Years)"]
         yoy_chg = avg_matrix.loc["PORTFOLIO AVG", "2024 → 2025"]
 
-        insight(
-            f"Portfolio-wide average Full Turn cost is <strong>{fmt(port_avg)}</strong> over 2016–2025. "
-            f"<strong>{top_prop}</strong> has the highest average, while <strong>{low_prop}</strong> runs lowest. "
-            f"Year-over-year, portfolio costs moved <strong>{pct(yoy_chg)}</strong> from 2024 to 2025."
-        )
+        if len(prop_only) >= 2:
+            top_prop = prop_only.sort_values("Avg (All Years)", ascending=False).index[0]
+            low_candidates = prop_only[prop_only["Avg (All Years)"] > 0].sort_values("Avg (All Years)", ascending=True)
+            low_prop = low_candidates.index[0] if len(low_candidates) else top_prop
+            insight(
+                f"Portfolio-wide average Full Turn cost is <strong>{fmt(port_avg)}</strong> over 2016–2025. "
+                f"<strong>{top_prop}</strong> has the highest average, while <strong>{low_prop}</strong> runs lowest. "
+                f"Year-over-year, portfolio costs moved <strong>{pct(yoy_chg)}</strong> from 2024 to 2025."
+            )
+        else:
+            insight(
+                f"Portfolio-wide average Full Turn cost is <strong>{fmt(port_avg)}</strong> over 2016–2025. "
+                f"Year-over-year, portfolio costs moved <strong>{pct(yoy_chg)}</strong> from 2024 to 2025."
+            )
 
     with tab_vol:
         count_matrix["Total"] = count_matrix.sum(axis=1)
@@ -1368,7 +1375,7 @@ Key definitions:
 - Full Turn: A complete unit renovation after a tenant moves out (avg $15-23K)
 - Turn Key: Unique identifier for each turn event (Property + Unit + Move-Out Date)
 - Duration: Days from move-out to last invoice (renovation timeline)
-- Budget Categories: 17 categories split into Materials (Supplies, Appliances, Flooring Materials, Paint, Cabinets Materials, Countertops Materials, Windows) and Labor (Labor General, Flooring Labor, Electric General, Countertops Labor, Plumbing, Powerwash and Demo, Management Fee, Scrape Ceiling, Glaze, Cabinets Labor)
+- Budget Categories: 17 categories split into Materials (Supplies, Appliances, Flooring Materials, Cabinets Materials, Countertops Materials, Windows) and Labor (Labor General, Flooring Labor, Electric General, Countertops Labor, Plumbing, Powerwash and Demo, Management Fee, Scrape Ceiling, Glaze, Cabinets Labor, Paint)
 
 Here is the current portfolio data summary:
 
