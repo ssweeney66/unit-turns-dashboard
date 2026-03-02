@@ -1081,7 +1081,7 @@ elif view == "1 — Executive Summary":
         )
 
     # ━━ Section 2: Property Benchmarking ━━
-    section("Property Benchmarking — By Portfolio Size")
+    section("Property Benchmarking — Cost Efficiency Ranking")
 
     prop_bench = ft_turns[ft_turns["Year"].isin(YEARS)].groupby("Property Name").agg(
         turns=("Turn Key", "count"),
@@ -1089,18 +1089,16 @@ elif view == "1 — Executive Summary":
         median_cost=("total_cost", "median"),
         total_spend=("total_cost", "sum"),
         avg_duration=("Duration", "median"),
-    ).reset_index()
-    prop_bench["_order"] = prop_sort_key(prop_bench["Property Name"])
-    prop_bench = prop_bench.sort_values("_order")
+    ).reset_index().sort_values("avg_cost", ascending=False)
 
-    # Add rank
+    # Add rank (1 = highest avg cost)
     prop_bench["Rank"] = range(1, len(prop_bench) + 1)
     prop_bench["vs Portfolio"] = ((prop_bench["avg_cost"] - portfolio_avg) / portfolio_avg * 100) if portfolio_avg > 0 else 0
 
     col1, col2 = st.columns([3, 2])
     with col1:
-        # Chart: reverse order so largest-unit property is at top of horizontal bar
-        chart_data = prop_bench.sort_values("_order", ascending=False)
+        # Chart: lowest cost at top, highest at bottom (ascending for horizontal bar)
+        chart_data = prop_bench.sort_values("avg_cost", ascending=True)
         fig_bench = px.bar(
             chart_data,
             y="Property Name", x="avg_cost", orientation="h",
