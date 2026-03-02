@@ -421,55 +421,6 @@ if view == "3 — Property Summary":
         st.plotly_chart(fig_fp, use_container_width=True)
 
     # ══════════════════════════════════════════════════
-    # FLOOR PLAN FILTER
-    # ══════════════════════════════════════════════════
-    st.markdown("---")
-    floor_plans = sorted(p_turns["Floor Plan"].dropna().unique())
-    fp_options = ["All Floor Plans"] + floor_plans
-    selected_fp = st.selectbox("Filter by Floor Plan", fp_options, key="prop_fp")
-
-    if selected_fp == "All Floor Plans":
-        fp_turns = p_turns.copy()
-        fp_lines = p_lines.copy()
-    else:
-        fp_turns = p_turns[p_turns["Floor Plan"] == selected_fp].copy()
-        fp_lines = p_lines[p_lines["Floor Plan"] == selected_fp].copy()
-
-    fp_label = selected_fp if selected_fp != "All Floor Plans" else "All Floor Plans"
-
-    # ══════════════════════════════════════════════════
-    # LAST 5 COMPLETED TURNS (floor-plan-filtered)
-    # ══════════════════════════════════════════════════
-    section(f"Last 5 Completed Full Turns — {fp_label}")
-
-    last5 = fp_turns.sort_values("completion_date", ascending=False).head(5).copy()
-
-    if len(last5) == 0:
-        st.info(f"No completed Full Turns found for {fp_label}.")
-    else:
-        last5["#"] = range(1, len(last5) + 1)
-        last5["Completion"] = last5["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
-        last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
-        last5["Cost"] = last5["total_cost"].apply(fmt)
-        last5["Dur"] = last5["Duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
-
-        l5_disp = last5[["#", "Unit Label", "Floor Plan", "Move-Out", "Completion",
-                         "Cost", "Dur", "line_items"]].copy()
-        l5_disp.columns = ["#", "Unit", "Floor Plan", "Move-Out", "Completion",
-                           "Total Cost", "Duration", "Invoices"]
-        st.dataframe(l5_disp, use_container_width=True, hide_index=True)
-
-        for _, t in last5.iterrows():
-            with st.expander(f"Detail — {t['Unit Label']} — {t['Move-Out']}"):
-                items = fp_lines[fp_lines["Turn Key"] == t["Turn Key"]].sort_values("Invoice Date")
-                d = items[["Vendor Name", "Budget Category", "Cost Type",
-                           "Invoice Amount", "Invoice Date", "Line Item Notes"]].copy()
-                d["Invoice Amount"] = d["Invoice Amount"].apply(lambda x: fmt(x, 2))
-                d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
-                d["Line Item Notes"] = d["Line Item Notes"].fillna("")
-                st.dataframe(d, use_container_width=True, hide_index=True)
-
-    # ══════════════════════════════════════════════════
     # EXPENSE SUMMARY BY COST TYPE
     # ══════════════════════════════════════════════════
 
@@ -499,12 +450,12 @@ if view == "3 — Property Summary":
         fp_ct_display[col] = fp_ct_display[col].apply(fmt)
     st.dataframe(fp_ct_display, use_container_width=True)
 
-    # ── Part 2: Year-by-year Cost Type trend (floor-plan-filtered) ──
-    section(f"Cost Type Trend by Year — {fp_label}")
+    # ── Part 2: Year-by-year Cost Type trend (property-wide) ──
+    section(f"Cost Type Trend by Year — {prop}")
 
-    trend_lines = fp_lines[fp_lines["Year"].isin(EXPENSE_YEARS)].copy()
+    trend_lines = p_lines[p_lines["Year"].isin(EXPENSE_YEARS)].copy()
     trend_turn_counts = (
-        fp_turns[fp_turns["Year"].isin(EXPENSE_YEARS)]
+        p_turns[p_turns["Year"].isin(EXPENSE_YEARS)]
         .groupby("Year")["Turn Key"].nunique()
         .reindex(EXPENSE_YEARS, fill_value=0)
     )
@@ -557,7 +508,7 @@ if view == "3 — Property Summary":
     # ══════════════════════════════════════════════════
     # DETAILED EXPENSE ANALYSIS BY BUDGET CATEGORY
     # ══════════════════════════════════════════════════
-    section(f"Expense Analysis by Budget Category — {fp_label}")
+    section(f"Expense Analysis by Budget Category — {prop}")
     st.caption(f"Average cost per Full Turn by budget category ({EXPENSE_YEARS[0]} – {expense_year_label(EXPENSE_YEARS[-1])})")
 
     # Pre-compute: spend by budget category and year
@@ -584,22 +535,60 @@ if view == "3 — Property Summary":
     port_avg_all = ft_turns["total_cost"].mean()
     vs_port = ((avg_cost - port_avg_all) / port_avg_all * 100) if port_avg_all > 0 else 0
 
-    fp_context = ""
-    if selected_fp != "All Floor Plans" and len(fp_turns) > 0:
-        fp_avg = fp_turns["total_cost"].mean()
-        fp_context = (
-            f" The <strong>{selected_fp}</strong> floor plan accounts for "
-            f"<strong>{len(fp_turns)}</strong> turns with an average cost of "
-            f"<strong>{fmt(fp_avg)}</strong>."
-        )
-
     insight(
         f"<strong>{prop}</strong> has completed <strong>{len(p_turns):,}</strong> Full Turns "
         f"totaling <strong>{fmt(total_spend)}</strong>. "
         f"Average cost per turn is <strong>{fmt(avg_cost)}</strong>, which is "
         f"<strong>{pct(vs_port)}</strong> vs the portfolio average of "
-        f"<strong>{fmt(port_avg_all)}</strong>.{fp_context}"
+        f"<strong>{fmt(port_avg_all)}</strong>."
     )
+
+    # ══════════════════════════════════════════════════
+    # RECENT TURNS BY FLOOR PLAN (drill-down)
+    # ══════════════════════════════════════════════════
+    st.markdown("---")
+    floor_plans = sorted(p_turns["Floor Plan"].dropna().unique())
+    fp_options = ["All Floor Plans"] + floor_plans
+    selected_fp = st.selectbox("Filter by Floor Plan", fp_options, key="prop_fp")
+
+    if selected_fp == "All Floor Plans":
+        fp_turns = p_turns.copy()
+        fp_lines = p_lines.copy()
+    else:
+        fp_turns = p_turns[p_turns["Floor Plan"] == selected_fp].copy()
+        fp_lines = p_lines[p_lines["Floor Plan"] == selected_fp].copy()
+
+    fp_label = selected_fp if selected_fp != "All Floor Plans" else "All Floor Plans"
+
+    section(f"Last 5 Completed Full Turns — {fp_label}")
+
+    last5 = fp_turns.sort_values("completion_date", ascending=False).head(5).copy()
+
+    if len(last5) == 0:
+        st.info(f"No completed Full Turns found for {fp_label}.")
+    else:
+        last5["#"] = range(1, len(last5) + 1)
+        last5["Completion"] = last5["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
+        last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
+        last5["Cost"] = last5["total_cost"].apply(fmt)
+        last5["Dur"] = last5["Duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
+
+        l5_disp = last5[["#", "Unit Label", "Floor Plan", "Move-Out", "Completion",
+                         "Cost", "Dur", "line_items"]].copy()
+        l5_disp.columns = ["#", "Unit", "Floor Plan", "Move-Out", "Completion",
+                           "Total Cost", "Duration", "Invoices"]
+        st.dataframe(l5_disp, use_container_width=True, hide_index=True)
+
+        for _, t in last5.iterrows():
+            with st.expander(f"Detail — {t['Unit Label']} — {t['Move-Out']}"):
+                items = fp_lines[fp_lines["Turn Key"] == t["Turn Key"]].sort_values("Invoice Date")
+                d = items[["Vendor Name", "Budget Category", "Cost Type",
+                           "Invoice Amount", "Invoice Date", "Line Item Notes"]].copy()
+                d["Invoice Amount"] = d["Invoice Amount"].apply(lambda x: fmt(x, 2))
+                d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
+                d["Line Item Notes"] = d["Line Item Notes"].fillna("")
+                st.dataframe(d, use_container_width=True, hide_index=True)
+
     footer()
 
 
