@@ -1064,7 +1064,7 @@ elif view == "4 — Category Trends":
 
     # Total potential savings from rising categories
     total_rise = rising_cats.sum()
-    num_turns_2025 = cat_year_spend[cat_year_spend["Year"] == 2025]["turn_count"].max() if len(cat_year_spend[cat_year_spend["Year"] == 2025]) else 0
+    num_turns_2025 = cat_year_spend[cat_year_spend["Year"] == 2025]["n_turns"].max() if len(cat_year_spend[cat_year_spend["Year"] == 2025]) else 0
 
     parts = []
     # Headline: Materials vs Labor balance
