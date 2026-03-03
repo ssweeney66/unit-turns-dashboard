@@ -1000,22 +1000,35 @@ elif view == "5 — Unit Search":
             dur_last = last_ft["latest_invoice"] - last_ft_date if pd.notna(last_ft.get("latest_invoice")) and pd.notna(last_ft_date) else pd.NaT
             c3.metric("Duration", f"{dur_last.days}d" if pd.notna(dur_last) and hasattr(dur_last, "days") and dur_last.days >= 0 else "—")
 
-            # Grouped display: Core Labor → Core Materials → Other
+            # Checklist: ALL categories in constant order, mark completed vs not
             cat_amounts = cat_brkdn.set_index("Budget Category")["Amount"]
+            completed_count = sum(1 for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS if cat_amounts.get(c, 0) > 0)
+            total_cats = len(CORE_LABOR) + len(CORE_MATERIALS) + len(OTHER_CATS)
+            st.caption(f"✓ {completed_count} of {total_cats} categories completed on last Full Turn")
             for group_label, group_cats in [
                 ("Core Labor", CORE_LABOR),
                 ("Core Materials", CORE_MATERIALS),
                 ("Other", OTHER_CATS),
             ]:
-                group_data = [(c, cat_amounts.get(c, 0)) for c in group_cats if cat_amounts.get(c, 0) > 0]
-                if not group_data:
-                    continue
-                group_data.sort(key=lambda x: x[1], reverse=True)
-                subtotal = sum(v for _, v in group_data)
-                rows = [{"Budget Category": c, "Amount": v, "% of Total": f"{v / total_last_ft * 100:.0f}%" if total_last_ft > 0 else "—"} for c, v in group_data]
-                rows.append({"Budget Category": f"{group_label} Subtotal", "Amount": subtotal, "% of Total": f"{subtotal / total_last_ft * 100:.0f}%" if total_last_ft > 0 else "—"})
+                rows = []
+                subtotal = 0
+                for c in group_cats:
+                    amt = cat_amounts.get(c, 0)
+                    done = amt > 0
+                    subtotal += amt
+                    rows.append({
+                        "✓": "✓" if done else "—",
+                        "Budget Category": c,
+                        "Amount": fmt(amt, 2) if done else "—",
+                        "% of Total": f"{amt / total_last_ft * 100:.0f}%" if done and total_last_ft > 0 else "—",
+                    })
+                rows.append({
+                    "✓": "",
+                    "Budget Category": f"{group_label} Subtotal",
+                    "Amount": fmt(subtotal, 2),
+                    "% of Total": f"{subtotal / total_last_ft * 100:.0f}%" if total_last_ft > 0 else "—",
+                })
                 gdf = pd.DataFrame(rows)
-                gdf["Amount"] = gdf["Amount"].apply(lambda x: fmt(x, 2))
                 st.markdown(f"**{group_label}**")
                 st.dataframe(gdf, use_container_width=True, hide_index=True)
 
@@ -1082,22 +1095,35 @@ elif view == "5 — Unit Search":
             c2.metric("Based on Comps", f"{comp_turn_keys} {proj_type}s")
             c3.metric("Floor Plan", unit_floor_plan if unit_floor_plan else "—")
 
-            # Grouped scope of work: Core Labor → Core Materials → Other
+            # Checklist scope of work: ALL categories in constant order
             st.markdown(f"**Recommended Scope of Work — {proj_type}**")
+            expected_count = sum(1 for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS if proj_amounts.get(c, 0) > 0)
+            total_cats = len(CORE_LABOR) + len(CORE_MATERIALS) + len(OTHER_CATS)
+            st.caption(f"✓ {expected_count} of {total_cats} categories expected based on comparable turns")
             for group_label, group_cats in [
                 ("Core Labor", CORE_LABOR),
                 ("Core Materials", CORE_MATERIALS),
                 ("Other", OTHER_CATS),
             ]:
-                group_data = [(c, proj_amounts.get(c, 0)) for c in group_cats if proj_amounts.get(c, 0) > 0]
-                if not group_data:
-                    continue
-                group_data.sort(key=lambda x: x[1], reverse=True)
-                subtotal = sum(v for _, v in group_data)
-                rows = [{"Budget Category": c, "Projected Cost": v, "% of Total": f"{v / projected_total * 100:.0f}%" if projected_total > 0 else "—"} for c, v in group_data]
-                rows.append({"Budget Category": f"{group_label} Subtotal", "Projected Cost": subtotal, "% of Total": f"{subtotal / projected_total * 100:.0f}%" if projected_total > 0 else "—"})
+                rows = []
+                subtotal = 0
+                for c in group_cats:
+                    amt = proj_amounts.get(c, 0)
+                    expected = amt > 0
+                    subtotal += amt
+                    rows.append({
+                        "✓": "✓" if expected else "—",
+                        "Budget Category": c,
+                        "Projected Cost": fmt(amt) if expected else "—",
+                        "% of Total": f"{amt / projected_total * 100:.0f}%" if expected and projected_total > 0 else "—",
+                    })
+                rows.append({
+                    "✓": "",
+                    "Budget Category": f"{group_label} Subtotal",
+                    "Projected Cost": fmt(subtotal),
+                    "% of Total": f"{subtotal / projected_total * 100:.0f}%" if projected_total > 0 else "—",
+                })
                 gdf = pd.DataFrame(rows)
-                gdf["Projected Cost"] = gdf["Projected Cost"].apply(fmt)
                 st.markdown(f"**{group_label}**")
                 st.dataframe(gdf, use_container_width=True, hide_index=True)
 
