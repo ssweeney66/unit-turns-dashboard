@@ -975,15 +975,156 @@ elif view == "5 — Unit Search":
                 disp["Line Item Notes"] = disp["Line Item Notes"].fillna("")
                 st.dataframe(disp, use_container_width=True, hide_index=True)
 
-        section("Spending History")
-        turn_colors = {"Full Turn": "#dc2626", "Partial Turn": "#f59e0b", "Make Ready": "#10b981"}
-        fig = px.bar(
-            unit_ts, x="Move-Out Date", y="total_cost", color="Turn Type",
-            color_discrete_map=turn_colors, template=CHART_TEMPLATE,
-            labels={"total_cost": "Turn Cost ($)", "Move-Out Date": ""},
-        )
-        fig.update_layout(margin=dict(t=10, b=10), height=350)
-        st.plotly_chart(fig, use_container_width=True)
+        # ══════════════════════════════════════════════════
+        # PRE-SCOPING — MOST RECENT FULL TURN
+        # ══════════════════════════════════════════════════
+        unit_ft = unit_ts[unit_ts["Turn Type"] == "Full Turn"]
+        if len(unit_ft) > 0:
+            last_ft = unit_ft.sort_values("Move-Out Date", ascending=False).iloc[0]
+            last_ft_date = last_ft["Move-Out Date"]
+            last_ft_key = last_ft["Turn Key"]
+            last_ft_items = unit_df[unit_df["Turn Key"] == last_ft_key].copy()
+
+            section(f"Pre-Scoping — Most Recent Full Turn ({last_ft_date.strftime('%b %Y') if pd.notna(last_ft_date) else '—'})")
+
+            # Category breakdown
+            cat_brkdn = (
+                last_ft_items.groupby("Budget Category")["Invoice Amount"]
+                .sum().reset_index(name="Amount")
+                .sort_values("Amount", ascending=False)
+            )
+            total_last_ft = cat_brkdn["Amount"].sum()
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Last Full Turn Cost", fmt(total_last_ft))
+            c2.metric("Move-Out", last_ft_date.strftime("%b %d, %Y") if pd.notna(last_ft_date) else "—")
+            dur_last = last_ft["latest_invoice"] - last_ft_date if pd.notna(last_ft.get("latest_invoice")) and pd.notna(last_ft_date) else pd.NaT
+            c3.metric("Duration", f"{dur_last.days}d" if pd.notna(dur_last) and hasattr(dur_last, "days") and dur_last.days >= 0 else "—")
+
+            cat_display = cat_brkdn.copy()
+            cat_display["Share"] = (cat_display["Amount"] / total_last_ft * 100).apply(lambda x: f"{x:.0f}%") if total_last_ft > 0 else "—"
+            cat_display["Amount"] = cat_display["Amount"].apply(lambda x: fmt(x, 2))
+            cat_display.columns = ["Budget Category", "Amount", "% of Total"]
+            st.dataframe(cat_display, use_container_width=True, hide_index=True)
+
+            # Vendor summary
+            vendor_brkdn = (
+                last_ft_items.groupby("Vendor Name")["Invoice Amount"]
+                .sum().reset_index(name="Amount")
+                .sort_values("Amount", ascending=False)
+            )
+            vendor_brkdn["Amount"] = vendor_brkdn["Amount"].apply(lambda x: fmt(x, 2))
+            vendor_brkdn.columns = ["Vendor", "Total"]
+            with st.expander("Vendor Breakdown"):
+                st.dataframe(vendor_brkdn, use_container_width=True, hide_index=True)
+        else:
+            section("Pre-Scoping")
+            st.info("No Full Turn history for this unit. See projected costs below for budget guidance.")
+
+        # ══════════════════════════════════════════════════
+        # PROJECTED TURN COST
+        # ══════════════════════════════════════════════════
+        section("Projected Turn Cost — Recommended Scope & Budget")
+
+        unit_floor_plan = unit_df.iloc[0]["Floor Plan"] if len(unit_df) > 0 else None
+        has_prior_ft = len(unit_ft) > 0
+
+        # Determine projected turn type
+        if has_prior_ft:
+            proj_type = "Make Ready"
+            st.caption(
+                f"This unit has a prior Full Turn — projecting a **Make Ready** scope. "
+                f"Based on {unit_floor_plan} Make Ready data at {prop_choice} over the last 2 years."
+            )
+        else:
+            proj_type = "Full Turn"
+            st.caption(
+                f"No prior Full Turn on record — projecting a **Full Turn** scope. "
+                f"Based on {unit_floor_plan} Full Turn data at {prop_choice} over the last 2 years."
+            )
+
+        # Build comps: same floor plan, same property, same turn type, last 2 years
+        cutoff_2yr = pd.Timestamp.now() - pd.DateOffset(years=2)
+        comp_lines = _df_all[
+            (_df_all["Property Name"] == prop_choice)
+            & (_df_all["Floor Plan"] == unit_floor_plan)
+            & (_df_all["Turn Type"] == proj_type)
+            & (_df_all["Move-Out Date"] >= cutoff_2yr)
+        ].copy()
+
+        # Count comp turns
+        comp_turn_keys = comp_lines["Turn Key"].nunique()
+
+        if comp_turn_keys >= 1:
+            # Category-level avg per turn
+            comp_cat = (
+                comp_lines.groupby("Budget Category")["Invoice Amount"]
+                .sum().reset_index(name="total_spend")
+            )
+            comp_cat["Avg per Turn"] = comp_cat["total_spend"] / comp_turn_keys
+            comp_cat = comp_cat.sort_values("Avg per Turn", ascending=False)
+            projected_total = comp_cat["Avg per Turn"].sum()
+
+            # Cost type summary
+            comp_ct = (
+                comp_lines.groupby("Cost Type")["Invoice Amount"]
+                .sum().reset_index(name="total_spend")
+            )
+            comp_ct["Avg per Turn"] = comp_ct["total_spend"] / comp_turn_keys
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric(f"Projected {proj_type} Cost", fmt(projected_total))
+            c2.metric("Based on Comps", f"{comp_turn_keys} {proj_type}s")
+            c3.metric("Floor Plan", unit_floor_plan if unit_floor_plan else "—")
+
+            # Projected scope of work table
+            st.markdown(f"**Recommended Scope of Work — {proj_type}**")
+            scope_display = comp_cat[comp_cat["Avg per Turn"] > 0][["Budget Category", "Avg per Turn"]].copy()
+            scope_display["Share"] = (scope_display["Avg per Turn"] / projected_total * 100).apply(lambda x: f"{x:.0f}%") if projected_total > 0 else "—"
+            scope_display["Avg per Turn"] = scope_display["Avg per Turn"].apply(fmt)
+            scope_display.columns = ["Budget Category", "Projected Cost", "% of Total"]
+            st.dataframe(scope_display, use_container_width=True, hide_index=True)
+
+            # Cost type summary row
+            ct_display = comp_ct[comp_ct["Avg per Turn"] > 0][["Cost Type", "Avg per Turn"]].copy()
+            ct_display["Avg per Turn"] = ct_display["Avg per Turn"].apply(fmt)
+            ct_display.columns = ["Cost Type", "Projected Cost"]
+            with st.expander("By Cost Type"):
+                st.dataframe(ct_display, use_container_width=True, hide_index=True)
+
+            # Comparison to last Full Turn if available
+            if has_prior_ft:
+                delta = projected_total - total_last_ft
+                insight(
+                    f"<strong>Budget Guidance:</strong> Based on <strong>{comp_turn_keys}</strong> recent "
+                    f"{proj_type}s for {unit_floor_plan} units at {prop_choice}, "
+                    f"expect approximately <strong>{fmt(projected_total)}</strong>. "
+                    f"The last Full Turn on this unit cost <strong>{fmt(total_last_ft)}</strong> — "
+                    f"a Make Ready is typically a fraction of Full Turn scope."
+                )
+            else:
+                insight(
+                    f"<strong>Budget Guidance:</strong> Based on <strong>{comp_turn_keys}</strong> recent "
+                    f"Full Turns for {unit_floor_plan} units at {prop_choice}, "
+                    f"expect approximately <strong>{fmt(projected_total)}</strong>."
+                )
+        else:
+            # Fallback: no comps for this exact combination, try property-wide
+            fallback_lines = _df_all[
+                (_df_all["Property Name"] == prop_choice)
+                & (_df_all["Turn Type"] == proj_type)
+                & (_df_all["Move-Out Date"] >= cutoff_2yr)
+            ].copy()
+            fallback_turns = fallback_lines["Turn Key"].nunique()
+            if fallback_turns > 0:
+                fallback_total = fallback_lines["Invoice Amount"].sum() / fallback_turns
+                st.info(
+                    f"No {proj_type} comps for {unit_floor_plan} at {prop_choice} in the last 2 years. "
+                    f"Using property-wide {proj_type} average: **{fmt(fallback_total)}** "
+                    f"(based on {fallback_turns} turns)."
+                )
+            else:
+                st.info(f"No recent {proj_type} data available at {prop_choice} for projection.")
 
     footer()
 
