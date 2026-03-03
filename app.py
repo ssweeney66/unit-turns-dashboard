@@ -1157,28 +1157,46 @@ elif view == "5 — Unit Search":
         # Determine projected turn type
         if has_prior_ft:
             proj_type = "Make Ready"
-            st.caption(
-                f"This unit has a prior Full Turn — projecting a **Make Ready** scope. "
-                f"Based on {unit_floor_plan} Make Ready data at {prop_choice} over the last 2 years."
-            )
         else:
             proj_type = "Full Turn"
+
+        # Build comps based on turn type:
+        #   Make Ready → last 5 at the property (any floor plan, most recent pricing)
+        #   Full Turn  → same floor plan + last 2 years (floor plan matters for scope)
+        if proj_type == "Make Ready":
+            # Last 5 Make Readys at this property (any floor plan)
+            mr_turn_totals = (
+                _df_all[
+                    (_df_all["Property Name"] == prop_choice)
+                    & (_df_all["Turn Type"] == "Make Ready")
+                ].groupby("Turn Key").agg(
+                    move_out=("Move-Out Date", "first"),
+                ).reset_index()
+                .sort_values("move_out", ascending=False)
+                .head(5)
+            )
+            comp_keys = mr_turn_totals["Turn Key"].tolist()
+            comp_lines = _df_all[_df_all["Turn Key"].isin(comp_keys)].copy()
+            comp_turn_keys = len(comp_keys)
+            comp_desc = f"last {comp_turn_keys} Make Readys at {prop_choice}"
+            st.caption(
+                f"This unit has a prior Full Turn — projecting a **Make Ready** scope. "
+                f"Based on the {comp_desc}."
+            )
+        else:
+            cutoff_2yr = pd.Timestamp.now() - pd.DateOffset(years=2)
+            comp_lines = _df_all[
+                (_df_all["Property Name"] == prop_choice)
+                & (_df_all["Floor Plan"] == unit_floor_plan)
+                & (_df_all["Turn Type"] == "Full Turn")
+                & (_df_all["Move-Out Date"] >= cutoff_2yr)
+            ].copy()
+            comp_turn_keys = comp_lines["Turn Key"].nunique()
+            comp_desc = f"{comp_turn_keys} comparable Full Turns for {unit_floor_plan} units at {prop_choice} (last 2 years)"
             st.caption(
                 f"No prior Full Turn on record — projecting a **Full Turn** scope. "
-                f"Based on {unit_floor_plan} Full Turn data at {prop_choice} over the last 2 years."
+                f"Based on {comp_desc}."
             )
-
-        # Build comps: same floor plan, same property, same turn type, last 2 years
-        cutoff_2yr = pd.Timestamp.now() - pd.DateOffset(years=2)
-        comp_lines = _df_all[
-            (_df_all["Property Name"] == prop_choice)
-            & (_df_all["Floor Plan"] == unit_floor_plan)
-            & (_df_all["Turn Type"] == proj_type)
-            & (_df_all["Move-Out Date"] >= cutoff_2yr)
-        ].copy()
-
-        # Count comp turns
-        comp_turn_keys = comp_lines["Turn Key"].nunique()
 
         if comp_turn_keys >= 1:
             # Category-level avg per turn
@@ -1202,7 +1220,7 @@ elif view == "5 — Unit Search":
             st.markdown(
                 f'<div class="scope-card scope-card-projected">'
                 f'<p class="scope-title">Recommended Scope — {proj_type} &nbsp;|&nbsp; {expected_count} of {total_cats} Categories</p>'
-                f'<p class="scope-subtitle">Based on {comp_turn_keys} comparable {proj_type}s for {unit_floor_plan} units at {prop_choice} (last 2 years)</p>'
+                f'<p class="scope-subtitle">Based on {comp_desc}</p>'
                 f'{proj_checklist_html}'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -1212,35 +1230,38 @@ elif view == "5 — Unit Search":
             if has_prior_ft:
                 delta = projected_total - total_last_ft
                 insight(
-                    f"<strong>Budget Guidance:</strong> Based on <strong>{comp_turn_keys}</strong> recent "
-                    f"{proj_type}s for {unit_floor_plan} units at {prop_choice}, "
+                    f"<strong>Budget Guidance:</strong> Based on the <strong>{comp_desc}</strong>, "
                     f"expect approximately <strong>{fmt(projected_total)}</strong>. "
                     f"The last Full Turn on this unit cost <strong>{fmt(total_last_ft)}</strong> — "
                     f"a Make Ready is typically a fraction of Full Turn scope."
                 )
             else:
                 insight(
-                    f"<strong>Budget Guidance:</strong> Based on <strong>{comp_turn_keys}</strong> recent "
-                    f"Full Turns for {unit_floor_plan} units at {prop_choice}, "
+                    f"<strong>Budget Guidance:</strong> Based on <strong>{comp_desc}</strong>, "
                     f"expect approximately <strong>{fmt(projected_total)}</strong>."
                 )
         else:
-            # Fallback: no comps for this exact combination, try property-wide
-            fallback_lines = _df_all[
-                (_df_all["Property Name"] == prop_choice)
-                & (_df_all["Turn Type"] == proj_type)
-                & (_df_all["Move-Out Date"] >= cutoff_2yr)
-            ].copy()
-            fallback_turns = fallback_lines["Turn Key"].nunique()
-            if fallback_turns > 0:
-                fallback_total = fallback_lines["Invoice Amount"].sum() / fallback_turns
-                st.info(
-                    f"No {proj_type} comps for {unit_floor_plan} at {prop_choice} in the last 2 years. "
-                    f"Using property-wide {proj_type} average: **{fmt(fallback_total)}** "
-                    f"(based on {fallback_turns} turns)."
-                )
+            # Fallback: no comps found at all
+            if proj_type == "Full Turn":
+                # Try property-wide Full Turns (any floor plan, last 2 years)
+                cutoff_2yr = pd.Timestamp.now() - pd.DateOffset(years=2)
+                fallback_lines = _df_all[
+                    (_df_all["Property Name"] == prop_choice)
+                    & (_df_all["Turn Type"] == "Full Turn")
+                    & (_df_all["Move-Out Date"] >= cutoff_2yr)
+                ].copy()
+                fallback_turns = fallback_lines["Turn Key"].nunique()
+                if fallback_turns > 0:
+                    fallback_total = fallback_lines["Invoice Amount"].sum() / fallback_turns
+                    st.info(
+                        f"No Full Turn comps for {unit_floor_plan} at {prop_choice} in the last 2 years. "
+                        f"Using property-wide Full Turn average: **{fmt(fallback_total)}** "
+                        f"(based on {fallback_turns} turns)."
+                    )
+                else:
+                    st.info(f"No recent Full Turn data available at {prop_choice} for projection.")
             else:
-                st.info(f"No recent {proj_type} data available at {prop_choice} for projection.")
+                st.info(f"No Make Ready data available at {prop_choice} for projection.")
 
     footer()
 
