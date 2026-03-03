@@ -6,6 +6,8 @@ import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
 from openai import OpenAI
+from anthropic import Anthropic
+from google import genai as google_genai
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIG
@@ -2116,16 +2118,93 @@ Guidelines:
 - When comparing properties, always rank them
 - Use percentage changes for YoY comparisons"""
 
-    # ── API Key handling ──
+    # ── Provider & model config ──
+    PROVIDERS = {
+        "Claude (Anthropic)": {
+            "models": ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"],
+            "default": "claude-sonnet-4-20250514",
+            "placeholder": "sk-ant-...",
+            "label": "Anthropic API Key",
+        },
+        "GPT (OpenAI)": {
+            "models": ["gpt-4o-mini", "gpt-4o"],
+            "default": "gpt-4o-mini",
+            "placeholder": "sk-...",
+            "label": "OpenAI API Key",
+        },
+        "Gemini (Google)": {
+            "models": ["gemini-2.0-flash", "gemini-2.0-flash-lite"],
+            "default": "gemini-2.0-flash",
+            "placeholder": "AI...",
+            "label": "Google AI API Key",
+        },
+    }
+
+    col_prov, col_model = st.columns([1, 1])
+    with col_prov:
+        provider = st.selectbox("AI Provider", list(PROVIDERS.keys()))
+    with col_model:
+        prov_cfg = PROVIDERS[provider]
+        model = st.selectbox("Model", prov_cfg["models"], index=0)
+
     api_key = st.text_input(
-        "OpenAI API Key",
+        prov_cfg["label"],
         type="password",
-        placeholder="sk-...",
-        help="Enter your OpenAI API key to enable the Data Review LLM. Your key is never stored."
+        placeholder=prov_cfg["placeholder"],
+        help=f"Enter your {prov_cfg['label']} to enable the Data Review LLM. Your key is never stored.",
     )
 
+    def call_llm(provider, model, api_key, system_prompt, messages):
+        """Unified LLM call across providers. Returns the assistant response text."""
+        if provider == "Claude (Anthropic)":
+            client = Anthropic(api_key=api_key)
+            # Anthropic uses a separate system param; messages must alternate user/assistant
+            api_msgs = [{"role": m["role"], "content": m["content"]} for m in messages]
+            response = client.messages.create(
+                model=model,
+                system=system_prompt,
+                messages=api_msgs,
+                max_tokens=1024,
+                temperature=0.3,
+            )
+            return response.content[0].text
+
+        elif provider == "GPT (OpenAI)":
+            client = OpenAI(api_key=api_key)
+            api_msgs = [{"role": "system", "content": system_prompt}] + [
+                {"role": m["role"], "content": m["content"]} for m in messages
+            ]
+            response = client.chat.completions.create(
+                model=model,
+                messages=api_msgs,
+                temperature=0.3,
+                max_tokens=1000,
+            )
+            return response.choices[0].message.content
+
+        elif provider == "Gemini (Google)":
+            client = google_genai.Client(api_key=api_key)
+            # Build contents: system instruction + conversation history
+            contents = []
+            for m in messages:
+                role = "user" if m["role"] == "user" else "model"
+                contents.append(google_genai.types.Content(
+                    role=role,
+                    parts=[google_genai.types.Part(text=m["content"])],
+                ))
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=google_genai.types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.3,
+                    max_output_tokens=1000,
+                ),
+            )
+            return response.text
+
     if not api_key:
-        st.info("🔑 Enter your OpenAI API key above to start asking questions about your data. "
+        st.info(f"Enter your {prov_cfg['label']} above to start asking questions about your data. "
                 "Your key is used only for this session and is never stored.")
         st.markdown("**Example questions you can ask:**")
         st.markdown("""
@@ -2139,7 +2218,12 @@ Guidelines:
         """)
         footer()
     else:
-        client = OpenAI(api_key=api_key)
+        # Clear chat when provider changes
+        if "llm_provider" not in st.session_state:
+            st.session_state.llm_provider = provider
+        if st.session_state.llm_provider != provider:
+            st.session_state.chat_messages = []
+            st.session_state.llm_provider = provider
 
         # Initialize chat history
         if "chat_messages" not in st.session_state:
@@ -2157,35 +2241,25 @@ Guidelines:
             with st.chat_message("user"):
                 st.markdown(prompt)
 
-            # Build messages for API
-            api_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            # Include last 10 messages for context
-            for msg in st.session_state.chat_messages[-10:]:
-                api_messages.append({"role": msg["role"], "content": msg["content"]})
-
             # Get AI response
             with st.chat_message("assistant"):
-                with st.spinner("Analyzing your data..."):
+                with st.spinner(f"Analyzing via {provider}..."):
                     try:
-                        response = client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=api_messages,
-                            temperature=0.3,
-                            max_tokens=1000,
-                        )
-                        answer = response.choices[0].message.content
+                        # Include last 10 messages for context
+                        recent = st.session_state.chat_messages[-10:]
+                        answer = call_llm(provider, model, api_key, SYSTEM_PROMPT, recent)
                         st.markdown(answer)
                         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
                     except Exception as e:
                         error_msg = str(e)
-                        if "api_key" in error_msg.lower() or "auth" in error_msg.lower():
-                            st.error("❌ Invalid API key. Please check your OpenAI API key and try again.")
+                        if "api_key" in error_msg.lower() or "auth" in error_msg.lower() or "api key" in error_msg.lower():
+                            st.error(f"Invalid API key. Please check your {prov_cfg['label']} and try again.")
                         else:
-                            st.error(f"❌ Error: {error_msg}")
+                            st.error(f"Error: {error_msg}")
 
         # Clear chat button
         if st.session_state.chat_messages:
-            if st.button("🗑️ Clear Chat History"):
+            if st.button("Clear Chat History"):
                 st.session_state.chat_messages = []
                 st.rerun()
 
