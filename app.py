@@ -518,7 +518,7 @@ if view == "3 — Property Summary":
         turns=("Turn Key", "count"),
         avg_cost=("total_cost", "mean"),
         total=("total_cost", "sum"),
-    ).reset_index().sort_values("turns", ascending=False)
+    ).reset_index().sort_values("Floor Plan")
 
     col1, col2 = st.columns([2, 3])
     with col1:
@@ -561,7 +561,7 @@ if view == "3 — Property Summary":
         values="avg_per_turn", fill_value=0
     ).reindex(columns=COST_TYPES, fill_value=0)
     fp_ct_pivot["Total"] = fp_ct_pivot.sum(axis=1)
-    fp_ct_pivot = fp_ct_pivot.sort_values("Total", ascending=False)
+    fp_ct_pivot = fp_ct_pivot.sort_index()
 
     fp_ct_display = fp_ct_pivot.copy()
     for col in fp_ct_display.columns:
