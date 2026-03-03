@@ -470,7 +470,7 @@ st.sidebar.caption(
 # VIEW 3: PROPERTY SUMMARY
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if view == "3 — Property Summary":
-    banner("Property Summary", "Renovation volume, floor plan comparison, and standardized expense analysis by property")
+    banner("Property Summary", "Single-property deep dive — turn volume, expense breakdown, and category outliers")
 
     prop = st.selectbox("Select Property", PROPERTIES)
     p_turns = ft_turns[ft_turns["Property Name"] == prop].copy()
@@ -650,25 +650,9 @@ if view == "3 — Property Summary":
                           yoy_pairs=prop_yoy_pairs)
 
     # ══════════════════════════════════════════════════
-    # NARRATIVE INSIGHT
-    # ══════════════════════════════════════════════════
-    total_spend = p_turns["total_cost"].sum()
-    avg_cost = p_turns["total_cost"].mean()
-    port_avg_all = ft_turns["total_cost"].mean()
-    vs_port = ((avg_cost - port_avg_all) / port_avg_all * 100) if port_avg_all > 0 else 0
-
-    insight(
-        f"<strong>{prop}</strong> has completed <strong>{len(p_turns):,}</strong> Full Turns "
-        f"totaling <strong>{fmt(total_spend)}</strong>. "
-        f"Average cost per turn is <strong>{fmt(avg_cost)}</strong>, which is "
-        f"<strong>{pct(vs_port)}</strong> vs the portfolio average of "
-        f"<strong>{fmt(port_avg_all)}</strong>."
-    )
-
-    # ══════════════════════════════════════════════════
     # RECENT TURNS BY FLOOR PLAN (drill-down)
     # ══════════════════════════════════════════════════
-    st.markdown("---")
+    section(f"Recent Turns — {prop}")
     floor_plans = sorted(p_turns["Floor Plan"].dropna().unique())
     fp_options = ["All Floor Plans"] + floor_plans
     selected_fp = st.selectbox("Filter by Floor Plan", fp_options, key="prop_fp")
@@ -764,6 +748,29 @@ if view == "3 — Property Summary":
     else:
         st.success(f"No category outliers detected at {prop}.")
 
+    # ══════════════════════════════════════════════════
+    # CLOSING NARRATIVE — PROPERTY SUMMARY
+    # ══════════════════════════════════════════════════
+    total_spend = p_turns["total_cost"].sum()
+    avg_cost = p_turns["total_cost"].mean()
+    port_avg_all = ft_turns["total_cost"].mean()
+    vs_port = ((avg_cost - port_avg_all) / port_avg_all * 100) if port_avg_all > 0 else 0
+    outlier_count = len(flagged)
+
+    insight_text = (
+        f"<strong>{prop}</strong> has completed <strong>{len(p_turns):,}</strong> Full Turns "
+        f"totaling <strong>{fmt(total_spend)}</strong>. "
+        f"Average cost per turn is <strong>{fmt(avg_cost)}</strong>, which is "
+        f"<strong>{pct(vs_port)}</strong> vs the portfolio average of "
+        f"<strong>{fmt(port_avg_all)}</strong>."
+    )
+    if outlier_count > 0:
+        insight_text += (
+            f" <strong>{outlier_count}</strong> category outlier flags were identified — "
+            f"review high-excess items above for potential cost control opportunities."
+        )
+    insight(insight_text)
+
     footer()
 
 
@@ -771,7 +778,7 @@ if view == "3 — Property Summary":
 # VIEW 2: PORTFOLIO OVERVIEW
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "2 — Portfolio Overview":
-    banner("Portfolio Summary", "Average Full Turn cost per property — 2016 through 2025")
+    banner("Portfolio Overview", "Cross-property cost comparison and turn volume — 2016 through 2025")
 
     SUMMARY_YEARS = YEARS
 
@@ -859,6 +866,22 @@ elif view == "2 — Portfolio Overview":
         count_matrix.loc["PORTFOLIO TOTAL"] = count_matrix.sum()
         count_matrix = count_matrix.astype(int)
         st.dataframe(count_matrix, use_container_width=True, height=560)
+
+        # Volume insight
+        vol_total = int(count_matrix.loc["PORTFOLIO TOTAL", "Total"])
+        prop_only_vol = count_matrix.drop("PORTFOLIO TOTAL")
+        busiest_prop = prop_only_vol["Total"].idxmax() if len(prop_only_vol) > 0 else "—"
+        busiest_count = int(prop_only_vol["Total"].max()) if len(prop_only_vol) > 0 else 0
+        # Busiest year (excluding Total column)
+        year_totals = count_matrix.loc["PORTFOLIO TOTAL", SUMMARY_YEARS]
+        busiest_year = int(year_totals.idxmax()) if year_totals.max() > 0 else "—"
+        busiest_yr_count = int(year_totals.max())
+        insight(
+            f"The portfolio has completed <strong>{vol_total:,}</strong> Full Turns across "
+            f"<strong>{len(prop_only_vol)}</strong> properties. "
+            f"<strong>{busiest_prop}</strong> leads with <strong>{busiest_count}</strong> total turns, "
+            f"and <strong>{busiest_year}</strong> was the busiest year with <strong>{busiest_yr_count}</strong> turns portfolio-wide."
+        )
 
     footer()
 
@@ -1016,7 +1039,7 @@ elif view == "4 — Category Trends":
 # VIEW 5: UNIT SEARCH
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "5 — Unit Search":
-    banner("Unit Search & History", "Full renovation history for any unit in the portfolio")
+    banner("Unit Search", "Unit-level turn history, pre-scoping checklist, and projected turn cost")
 
     # Use all-types turn summary for this view
     all_turns = build_turn_summary(_df_all)
@@ -1226,7 +1249,7 @@ elif view == "5 — Unit Search":
 # VIEW 1: EXECUTIVE SUMMARY
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "1 — Executive Summary":
-    banner("Executive Intelligence", "Strategic performance overview for senior leadership — Full Turn portfolio analytics")
+    banner("Executive Summary", "Portfolio-wide performance, benchmarking, and risk flags — 2016 through 2025")
 
     # ── Compute core metrics ──
     curr_year = ft_turns[ft_turns["Year"] == 2025]
@@ -1416,10 +1439,21 @@ elif view == "1 — Executive Summary":
         v_display.columns = ["Vendor", "Total Spend", "Portfolio %", "Invoices", "Properties"]
         st.dataframe(v_display, use_container_width=True, hide_index=True, height=400)
 
+    # Vendor narrative
+    top_vendor = top_vendors.iloc[0]["Vendor Name"] if len(top_vendors) > 0 else "—"
+    top_vendor_share = top_vendors.iloc[0]["Share"] if len(top_vendors) > 0 else 0
+    multi_prop_vendors = len(vendor_data[vendor_data["properties"] >= 3])
+    vendor_insight_text = (
+        f"<strong>{top_vendor}</strong> is the largest vendor at <strong>{top_vendor_share:.1f}%</strong> "
+        f"of total spend. <strong>{multi_prop_vendors}</strong> vendors serve 3 or more properties, "
+        f"while <strong>{len(vendor_data[vendor_data['properties'] == 1])}</strong> are single-property vendors."
+    )
     if top_share > 60:
-        st.markdown(f'<div class="outlier-flag"><strong>Concentration Risk:</strong> Top {top_n} vendors control '
-                    f'<strong>{top_share:.1f}%</strong> of spend. Consider diversifying to reduce dependency and '
-                    f'improve pricing leverage.</div>', unsafe_allow_html=True)
+        vendor_insight_text += (
+            f" <strong>Concentration risk:</strong> the top {top_n} vendors control "
+            f"<strong>{top_share:.1f}%</strong> of spend — consider diversifying to improve pricing leverage."
+        )
+    insight(vendor_insight_text)
 
     # ━━ Section 4: Capital Forecast ━━
     section("Capital Forecast — Projected Annual Full Turn Spend")
@@ -1571,7 +1605,7 @@ elif view == "1 — Executive Summary":
 # VIEW 6: DATA REVIEW LLM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "6 — Data Review LLM":
-    banner("Data Review LLM", "Ask questions about your Full Turn portfolio data — powered by AI")
+    banner("Data Review", "AI-powered Q&A — ask questions about your Full Turn portfolio data")
 
     # ── Build data context for the LLM ──
     @st.cache_data
