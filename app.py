@@ -1330,6 +1330,28 @@ elif view == "5 — Unit Search":
                 .sum().reset_index(name="total_spend")
             )
             comp_cat["Avg per Turn"] = comp_cat["total_spend"] / comp_turn_keys
+
+            # Category frequency filter — for Make Readies, only include categories
+            # that appeared in ≥50% of comp turns. This removes one-off items like
+            # Windows and Scrape Ceiling that are typically Full-Turn-only scope.
+            if proj_type == "Make Ready" and comp_turn_keys >= 3:
+                cat_freq = (
+                    comp_lines.groupby("Budget Category")["Turn Key"]
+                    .nunique().reset_index(name="turn_count")
+                )
+                cat_freq["frequency"] = cat_freq["turn_count"] / comp_turn_keys
+                common_cats = cat_freq[cat_freq["frequency"] >= 0.50]["Budget Category"].tolist()
+                excluded = comp_cat[~comp_cat["Budget Category"].isin(common_cats)]
+                comp_cat = comp_cat[comp_cat["Budget Category"].isin(common_cats)].copy()
+                if len(excluded) > 0:
+                    excluded_names = excluded["Budget Category"].tolist()
+                    excluded_total = excluded["Avg per Turn"].sum()
+                    st.caption(
+                        f"ℹ️ Excluded from projection: **{', '.join(excluded_names)}** "
+                        f"(appeared in <50% of comps, typically one-time Full Turn items — "
+                        f"${excluded_total:,.0f}/turn removed)."
+                    )
+
             projected_total = comp_cat["Avg per Turn"].sum()
             proj_amounts = comp_cat.set_index("Budget Category")["Avg per Turn"]
 
