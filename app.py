@@ -757,17 +757,32 @@ if view == "3 — Property Summary":
     vs_port = ((avg_cost - port_avg_all) / port_avg_all * 100) if port_avg_all > 0 else 0
     outlier_count = len(flagged)
 
+    # Find this property's most expensive category
+    prop_cat_totals = p_lines.groupby("Budget Category")["Invoice Amount"].sum()
+    top_cat = prop_cat_totals.idxmax() if len(prop_cat_totals) > 0 else "—"
+    top_cat_pct = (prop_cat_totals.max() / prop_cat_totals.sum() * 100) if prop_cat_totals.sum() > 0 else 0
+
+    # Property YoY trend
+    p24 = p_turns[p_turns["Year"] == 2024]["total_cost"]
+    p25 = p_turns[p_turns["Year"] == 2025]["total_cost"]
+    prop_yoy = ((p25.mean() - p24.mean()) / p24.mean() * 100) if len(p24) >= 2 and len(p25) >= 2 and p24.mean() > 0 else None
+
+    position = "above" if vs_port > 0 else "below"
     insight_text = (
-        f"<strong>{prop}</strong> has completed <strong>{len(p_turns):,}</strong> Full Turns "
-        f"totaling <strong>{fmt(total_spend)}</strong>. "
-        f"Average cost per turn is <strong>{fmt(avg_cost)}</strong>, which is "
-        f"<strong>{pct(vs_port)}</strong> vs the portfolio average of "
-        f"<strong>{fmt(port_avg_all)}</strong>."
+        f"<strong>{prop}</strong> averages <strong>{fmt(avg_cost)}</strong>/turn — "
+        f"<strong>{pct(vs_port)}</strong> {position} the portfolio average. "
+        f"<strong>{top_cat}</strong> is the largest expense category at <strong>{top_cat_pct:.0f}%</strong> of spend — "
+        f"{'negotiate better rates or standardize scope for this category to reduce costs.' if vs_port > 10 else 'this is in line with portfolio norms.'}"
     )
+    if prop_yoy is not None:
+        insight_text += (
+            f" Year-over-year costs {'increased' if prop_yoy > 0 else 'decreased'} <strong>{pct(prop_yoy)}</strong> "
+            f"from 2024 to 2025{'— investigate what changed in scope or vendor pricing.' if prop_yoy > 15 else '.'}"
+        )
     if outlier_count > 0:
         insight_text += (
-            f" <strong>{outlier_count}</strong> category outlier flags were identified — "
-            f"review high-excess items above for potential cost control opportunities."
+            f" <strong>{outlier_count}</strong> outlier flags above — "
+            f"focus on the highest-excess items for immediate cost savings."
         )
     insight(insight_text)
 
@@ -847,16 +862,27 @@ elif view == "2 — Portfolio Overview":
 
         if len(prop_only) >= 2:
             top_prop = prop_only.sort_values("Avg (All Years)", ascending=False).index[0]
+            top_avg = prop_only.loc[top_prop, "Avg (All Years)"]
             low_candidates = prop_only[prop_only["Avg (All Years)"] > 0].sort_values("Avg (All Years)", ascending=True)
             low_prop = low_candidates.index[0] if len(low_candidates) else top_prop
+            low_avg = prop_only.loc[low_prop, "Avg (All Years)"]
+            spread = top_avg - low_avg
+            # Count properties above/below avg
+            above_avg = len(prop_only[prop_only["Avg (All Years)"] > port_avg])
+            below_avg = len(prop_only[prop_only["Avg (All Years)"] <= port_avg])
+            # Properties with YoY increase
+            yoy_col = "2024 → 2025"
+            rising = prop_only[(prop_only[yoy_col].notna()) & (prop_only[yoy_col] > 0)]
             insight(
-                f"Portfolio-wide average Full Turn cost is <strong>{fmt(port_avg)}</strong> over 2016–2025. "
-                f"<strong>{top_prop}</strong> has the highest average, while <strong>{low_prop}</strong> runs lowest. "
-                f"Year-over-year, portfolio costs moved <strong>{pct(yoy_chg)}</strong> from 2024 to 2025."
+                f"The <strong>{fmt(spread)}</strong> gap between <strong>{top_prop}</strong> "
+                f"(<strong>{fmt(top_avg)}</strong>/turn) and <strong>{low_prop}</strong> "
+                f"(<strong>{fmt(low_avg)}</strong>/turn) highlights inconsistent renovation standards. "
+                f"<strong>{above_avg}</strong> properties run above the portfolio average of <strong>{fmt(port_avg)}</strong>. "
+                f"{'<strong>' + str(len(rising)) + '</strong> properties saw cost increases from 2024 to 2025 — drill into Property Summary for those to identify drivers.' if len(rising) > 0 else 'All properties held or reduced costs from 2024 to 2025.'}"
             )
         else:
             insight(
-                f"Portfolio-wide average Full Turn cost is <strong>{fmt(port_avg)}</strong> over 2016–2025. "
+                f"Portfolio-wide average Full Turn cost is <strong>{fmt(port_avg)}</strong>. "
                 f"Year-over-year, portfolio costs moved <strong>{pct(yoy_chg)}</strong> from 2024 to 2025."
             )
 
@@ -867,20 +893,26 @@ elif view == "2 — Portfolio Overview":
         count_matrix = count_matrix.astype(int)
         st.dataframe(count_matrix, use_container_width=True, height=560)
 
-        # Volume insight
+        # Volume insight — actionable
         vol_total = int(count_matrix.loc["PORTFOLIO TOTAL", "Total"])
         prop_only_vol = count_matrix.drop("PORTFOLIO TOTAL")
         busiest_prop = prop_only_vol["Total"].idxmax() if len(prop_only_vol) > 0 else "—"
         busiest_count = int(prop_only_vol["Total"].max()) if len(prop_only_vol) > 0 else 0
-        # Busiest year (excluding Total column)
-        year_totals = count_matrix.loc["PORTFOLIO TOTAL", SUMMARY_YEARS]
-        busiest_year = int(year_totals.idxmax()) if year_totals.max() > 0 else "—"
-        busiest_yr_count = int(year_totals.max())
+        busiest_pct = (busiest_count / vol_total * 100) if vol_total > 0 else 0
+        # Recent trend
+        vol_2024 = int(count_matrix.loc["PORTFOLIO TOTAL", 2024]) if 2024 in count_matrix.columns else 0
+        vol_2025 = int(count_matrix.loc["PORTFOLIO TOTAL", 2025]) if 2025 in count_matrix.columns else 0
+        vol_chg = vol_2025 - vol_2024
+        # Lowest volume property
+        lowest_prop = prop_only_vol["Total"].idxmin() if len(prop_only_vol) > 0 else "—"
+        lowest_count = int(prop_only_vol["Total"].min()) if len(prop_only_vol) > 0 else 0
         insight(
-            f"The portfolio has completed <strong>{vol_total:,}</strong> Full Turns across "
-            f"<strong>{len(prop_only_vol)}</strong> properties. "
-            f"<strong>{busiest_prop}</strong> leads with <strong>{busiest_count}</strong> total turns, "
-            f"and <strong>{busiest_year}</strong> was the busiest year with <strong>{busiest_yr_count}</strong> turns portfolio-wide."
+            f"<strong>{busiest_prop}</strong> accounts for <strong>{busiest_pct:.0f}%</strong> of all turns "
+            f"(<strong>{busiest_count}</strong> of {vol_total}) — prioritize standardizing scope and pricing there. "
+            f"Turn volume went from <strong>{vol_2024}</strong> in 2024 to <strong>{vol_2025}</strong> in 2025 "
+            f"(<strong>{vol_chg:+d}</strong> turns). "
+            f"<strong>{lowest_prop}</strong> has the fewest turns (<strong>{lowest_count}</strong>) — "
+            f"{'low volume means less data for benchmarking; combine with similar-sized properties for comparison.' if lowest_count < 10 else 'sufficient data for reliable benchmarking.'}"
         )
 
     footer()
@@ -1006,31 +1038,72 @@ elif view == "4 — Category Trends":
     # ══════════════════════════════════════════════════
     # NARRATIVE INSIGHT
     # ══════════════════════════════════════════════════
-    mat_share = f"{mat_spend / total_spend_5yr * 100:.0f}%" if total_spend_5yr > 0 else "—"
-    lab_share = f"{lab_spend / total_spend_5yr * 100:.0f}%" if total_spend_5yr > 0 else "—"
+    mat_pct = mat_spend / total_spend_5yr * 100 if total_spend_5yr > 0 else 0
+    lab_pct = lab_spend / total_spend_5yr * 100 if total_spend_5yr > 0 else 0
 
     cat_2024 = cat_year_spend[cat_year_spend["Year"] == 2024].set_index("Budget Category")["avg_per_turn"]
     cat_2025 = cat_year_spend[cat_year_spend["Year"] == 2025].set_index("Budget Category")["avg_per_turn"]
     cat_delta = (cat_2025 - cat_2024).dropna().sort_values()
+    rising_cats = cat_delta[cat_delta > 0]
+    falling_cats = cat_delta[cat_delta < 0]
 
-    insight_parts = [
-        f"Across the portfolio ({TREND_YEARS[0]}–{TREND_YEARS[-1]}), "
-        f"Materials represent <strong>{mat_share}</strong> of tracked spend "
-        f"(<strong>{fmt(mat_per_turn)}</strong>/turn) while Labor accounts for "
-        f"<strong>{lab_share}</strong> (<strong>{fmt(lab_per_turn)}</strong>/turn).",
-    ]
-    if len(cat_delta) > 0 and cat_delta.iloc[-1] > 0:
-        insight_parts.append(
-            f"<strong>{cat_delta.index[-1]}</strong> saw the largest per-turn cost increase "
-            f"year-over-year (<strong>+{fmt(cat_delta.iloc[-1])}</strong>)."
-        )
-    if len(cat_delta) > 0 and cat_delta.iloc[0] < 0:
-        insight_parts.append(
-            f"<strong>{cat_delta.index[0]}</strong> declined by "
-            f"<strong>{fmt(abs(cat_delta.iloc[0]))}</strong>/turn."
+    # Top 3 rising categories
+    top_risers = rising_cats.tail(3).iloc[::-1]
+    # Largest declining category
+    top_decliner = falling_cats.head(1)
+
+    # 5-year CAGR for materials and labor
+    mat_first = cat_year_spend[(cat_year_spend["Year"] == TREND_YEARS[0]) & (cat_year_spend["Budget Category"].isin(CORE_MATERIALS))]["avg_per_turn"].sum()
+    mat_last = cat_year_spend[(cat_year_spend["Year"] == TREND_YEARS[-1]) & (cat_year_spend["Budget Category"].isin(CORE_MATERIALS))]["avg_per_turn"].sum()
+    lab_first = cat_year_spend[(cat_year_spend["Year"] == TREND_YEARS[0]) & (cat_year_spend["Budget Category"].isin(CORE_LABOR))]["avg_per_turn"].sum()
+    lab_last = cat_year_spend[(cat_year_spend["Year"] == TREND_YEARS[-1]) & (cat_year_spend["Budget Category"].isin(CORE_LABOR))]["avg_per_turn"].sum()
+
+    n_yrs = TREND_YEARS[-1] - TREND_YEARS[0]
+    mat_cagr = ((mat_last / mat_first) ** (1 / n_yrs) - 1) * 100 if mat_first > 0 else 0
+    lab_cagr = ((lab_last / lab_first) ** (1 / n_yrs) - 1) * 100 if lab_first > 0 else 0
+
+    # Total potential savings from rising categories
+    total_rise = rising_cats.sum()
+    num_turns_2025 = cat_year_spend[cat_year_spend["Year"] == 2025]["turn_count"].max() if len(cat_year_spend[cat_year_spend["Year"] == 2025]) else 0
+
+    parts = []
+    # Headline: Materials vs Labor balance
+    parts.append(
+        f"<strong>Cost Structure:</strong> Materials account for <strong>{mat_pct:.0f}%</strong> "
+        f"(<strong>{fmt(mat_per_turn)}</strong>/turn) and Labor for <strong>{lab_pct:.0f}%</strong> "
+        f"(<strong>{fmt(lab_per_turn)}</strong>/turn) of portfolio spend. "
+        f"Materials have grown at <strong>{mat_cagr:+.1f}% CAGR</strong> vs Labor at "
+        f"<strong>{lab_cagr:+.1f}% CAGR</strong> since {TREND_YEARS[0]}."
+    )
+
+    # Escalating categories
+    if len(top_risers) > 0:
+        riser_items = [f"{cat} (+{fmt(val)})" for cat, val in top_risers.items()]
+        parts.append(
+            f"<strong>Escalating Categories ('24→'25):</strong> {', '.join(riser_items)}. "
+            f"These increases add <strong>{fmt(total_rise)}</strong> per turn — "
+            f"across {num_turns_2025} turns, that's <strong>{fmt(total_rise * num_turns_2025)}</strong> "
+            f"in incremental annual spend."
         )
 
-    insight(" ".join(insight_parts))
+    # Declining categories (positive sign)
+    if len(top_decliner) > 0:
+        parts.append(
+            f"<strong>Improving:</strong> {top_decliner.index[0]} is down "
+            f"<strong>{fmt(abs(top_decliner.iloc[0]))}</strong>/turn — "
+            f"investigate what drove that reduction and replicate across other categories."
+        )
+
+    # Action
+    primary_focus = "Materials" if mat_cagr > lab_cagr else "Labor"
+    parts.append(
+        f"<strong>Action:</strong> {primary_focus} costs are the faster-growing segment. "
+        f"Prioritize vendor re-bids and bulk purchasing agreements for the top escalating categories above. "
+        f"Target a <strong>5–10% reduction</strong> in the highest-growth category to recover "
+        f"<strong>{fmt(top_risers.iloc[0] * 0.1 * num_turns_2025 if len(top_risers) > 0 and num_turns_2025 > 0 else 0)}</strong>+ annually."
+    )
+
+    insight(" ".join(parts))
 
     footer()
 
@@ -1227,18 +1300,42 @@ elif view == "5 — Unit Search":
             )
 
             # Comparison to last Full Turn if available
+            top_proj_cat = proj_amounts.sort_values(ascending=False)
+            top_proj_name = top_proj_cat.index[0] if len(top_proj_cat) > 0 else "N/A"
+            top_proj_val = top_proj_cat.iloc[0] if len(top_proj_cat) > 0 else 0
+            top_proj_pct = top_proj_val / projected_total * 100 if projected_total > 0 else 0
+
             if has_prior_ft:
                 delta = projected_total - total_last_ft
+                delta_pct = delta / total_last_ft * 100 if total_last_ft > 0 else 0
+                mr_ratio = projected_total / total_last_ft * 100 if total_last_ft > 0 else 0
                 insight(
-                    f"<strong>Budget Guidance:</strong> Based on the <strong>{comp_desc}</strong>, "
-                    f"expect approximately <strong>{fmt(projected_total)}</strong>. "
-                    f"The last Full Turn on this unit cost <strong>{fmt(total_last_ft)}</strong> — "
-                    f"a Make Ready is typically a fraction of Full Turn scope."
+                    f"<strong>Budget Guidance:</strong> Projected <strong>{proj_type}</strong> cost is "
+                    f"<strong>{fmt(projected_total)}</strong> — <strong>{mr_ratio:.0f}%</strong> of the "
+                    f"last Full Turn (<strong>{fmt(total_last_ft)}</strong>). "
+                    f"The largest projected line item is <strong>{top_proj_name}</strong> at "
+                    f"<strong>{fmt(top_proj_val)}</strong> ({top_proj_pct:.0f}% of total). "
+                    f"<strong>Action:</strong> Get competitive bids on {top_proj_name} to keep this "
+                    f"Make Ready under <strong>{fmt(projected_total * 0.9)}</strong> (10% savings target)."
                 )
             else:
+                # Portfolio avg for same turn type
+                port_avg_type = ft_turns["total_cost"].mean() if proj_type == "Full Turn" else 0
+                vs_port = ""
+                if port_avg_type > 0:
+                    diff_pct = (projected_total - port_avg_type) / port_avg_type * 100
+                    position = "above" if diff_pct > 0 else "below"
+                    vs_port = (
+                        f" This is <strong>{abs(diff_pct):.0f}%</strong> {position} the portfolio "
+                        f"Full Turn average of <strong>{fmt(port_avg_type)}</strong>."
+                    )
                 insight(
-                    f"<strong>Budget Guidance:</strong> Based on <strong>{comp_desc}</strong>, "
-                    f"expect approximately <strong>{fmt(projected_total)}</strong>."
+                    f"<strong>Budget Guidance:</strong> Projected <strong>{proj_type}</strong> cost is "
+                    f"<strong>{fmt(projected_total)}</strong> based on <strong>{comp_desc}</strong>.{vs_port} "
+                    f"The largest projected line item is <strong>{top_proj_name}</strong> at "
+                    f"<strong>{fmt(top_proj_val)}</strong> ({top_proj_pct:.0f}% of total). "
+                    f"<strong>Action:</strong> Prioritize scope validation on the top 3 categories — "
+                    f"confirm necessity before approving work orders to avoid scope creep."
                 )
         else:
             # Fallback: no comps found at all
@@ -1347,15 +1444,22 @@ elif view == "1 — Executive Summary":
 
     # Cost efficiency narrative
     if len(yearly_stats) >= 2:
-        first_yr = yearly_stats.iloc[0]
-        last_yr = yearly_stats.iloc[-1]
-        total_chg = ((last_yr["avg_cost"] - first_yr["avg_cost"]) / first_yr["avg_cost"]) * 100 if first_yr["avg_cost"] > 0 else 0
+        last_3 = yearly_stats[yearly_stats["Year"].isin([2023, 2024, 2025])]
+        if len(last_3) >= 2:
+            recent_trend = ((last_3.iloc[-1]["avg_cost"] - last_3.iloc[0]["avg_cost"]) / last_3.iloc[0]["avg_cost"]) * 100 if last_3.iloc[0]["avg_cost"] > 0 else 0
+            trend_word = "rising" if recent_trend > 5 else ("declining" if recent_trend < -5 else "stable")
+        else:
+            recent_trend = 0
+            trend_word = "stable"
+        avg_vs_med = curr_avg - (curr_year["total_cost"].median() if len(curr_year) else 0)
+        skew_note = (
+            f" The gap between average and median in 2025 is <strong>{fmt(abs(avg_vs_med))}</strong>, "
+            f"indicating {'a few high-cost turns are pulling the average up — review those outliers for scope creep' if avg_vs_med > 1000 else 'consistent turn costs across the portfolio'}."
+        ) if len(curr_year) >= 3 else ""
         insight(
-            f"From <strong>{int(first_yr['Year'])}</strong> to <strong>{int(last_yr['Year'])}</strong>, "
-            f"average Full Turn cost moved from <strong>{fmt(first_yr['avg_cost'])}</strong> to "
-            f"<strong>{fmt(last_yr['avg_cost'])}</strong> — a cumulative shift of <strong>{pct(total_chg)}</strong>. "
-            f"Total capital deployed: <strong>{fmt(ft_turns['total_cost'].sum())}</strong> across "
-            f"<strong>{len(ft_turns):,}</strong> Full Turns."
+            f"Costs are <strong>{trend_word}</strong> over the last 3 years (<strong>{pct(recent_trend)}</strong> from 2023 to 2025). "
+            f"{'Focus on controlling scope at properties with rising costs — see benchmarking below.' if recent_trend > 5 else 'Cost discipline is holding — maintain current vendor agreements and scope standards.' if recent_trend <= 5 and recent_trend >= -5 else 'Cost reductions are working — document what changed and apply across the portfolio.'}"
+            f"{skew_note}"
         )
 
     # ━━ Section 2: Property Benchmarking ━━
@@ -1404,15 +1508,21 @@ elif view == "1 — Executive Summary":
         pb_display.columns = ["#", "Property", "Turns", "Avg Cost", "vs Portfolio", "Med Duration"]
         st.dataframe(pb_display, use_container_width=True, hide_index=True, height=480)
 
-    # Identify best and worst performers
+    # Identify best and worst performers with actionable gap analysis
     if len(prop_bench) >= 2:
         best = prop_bench.sort_values("avg_cost").iloc[0]
         worst = prop_bench.sort_values("avg_cost").iloc[-1]
+        cost_gap = worst["avg_cost"] - best["avg_cost"]
+        # Calculate potential savings if worst performed at portfolio avg
+        worst_excess_per_turn = worst["avg_cost"] - portfolio_avg
+        worst_potential_savings = worst_excess_per_turn * worst["turns"]
         insight(
-            f"<strong>{worst['Property Name']}</strong> has the highest average Full Turn cost at "
-            f"<strong>{fmt(worst['avg_cost'])}</strong> ({pct(worst['vs Portfolio'])} above portfolio avg), "
-            f"while <strong>{best['Property Name']}</strong> runs most efficiently at "
-            f"<strong>{fmt(best['avg_cost'])}</strong>. Investigating what drives this gap could yield significant savings."
+            f"<strong>{worst['Property Name']}</strong> averages <strong>{fmt(cost_gap)}</strong> more per turn "
+            f"than <strong>{best['Property Name']}</strong>. "
+            f"If {worst['Property Name']} operated at the portfolio average, it would have saved approximately "
+            f"<strong>{fmt(worst_potential_savings)}</strong> over <strong>{int(worst['turns'])}</strong> turns. "
+            f"<strong>Action:</strong> Compare vendor rates, scope of work, and material choices between these "
+            f"two properties to identify where the cost gap originates."
         )
 
     # ━━ Section 3: Vendor Concentration ━━
@@ -1460,21 +1570,21 @@ elif view == "1 — Executive Summary":
         v_display.columns = ["Vendor", "Total Spend", "Portfolio %", "Invoices", "Properties"]
         st.dataframe(v_display, use_container_width=True, hide_index=True, height=400)
 
-    # Vendor narrative
+    # Vendor narrative — actionable
     top_vendor = top_vendors.iloc[0]["Vendor Name"] if len(top_vendors) > 0 else "—"
     top_vendor_share = top_vendors.iloc[0]["Share"] if len(top_vendors) > 0 else 0
-    multi_prop_vendors = len(vendor_data[vendor_data["properties"] >= 3])
-    vendor_insight_text = (
-        f"<strong>{top_vendor}</strong> is the largest vendor at <strong>{top_vendor_share:.1f}%</strong> "
-        f"of total spend. <strong>{multi_prop_vendors}</strong> vendors serve 3 or more properties, "
-        f"while <strong>{len(vendor_data[vendor_data['properties'] == 1])}</strong> are single-property vendors."
+    top_vendor_spend = top_vendors.iloc[0]["total_spend"] if len(top_vendors) > 0 else 0
+    single_prop_count = len(vendor_data[vendor_data["properties"] == 1])
+    single_prop_spend = vendor_data[vendor_data["properties"] == 1]["total_spend"].sum()
+    single_prop_pct = (single_prop_spend / total_vendor_spend * 100) if total_vendor_spend > 0 else 0
+    insight(
+        f"<strong>{top_vendor}</strong> handles <strong>{top_vendor_share:.1f}%</strong> of all spend "
+        f"(<strong>{fmt(top_vendor_spend)}</strong>). "
+        f"<strong>{single_prop_count}</strong> vendors work at only one property, accounting for "
+        f"<strong>{single_prop_pct:.0f}%</strong> of spend — these are candidates for competitive bidding "
+        f"or consolidation with multi-property vendors who may offer volume discounts. "
+        f"<strong>Action:</strong> {'The top 10 vendors control ' + f'{top_share:.0f}% of spend — negotiate volume pricing or add backup vendors to reduce dependency.' if top_share > 60 else 'Vendor spread is healthy — continue monitoring for pricing consistency across properties.'}"
     )
-    if top_share > 60:
-        vendor_insight_text += (
-            f" <strong>Concentration risk:</strong> the top {top_n} vendors control "
-            f"<strong>{top_share:.1f}%</strong> of spend — consider diversifying to improve pricing leverage."
-        )
-    insight(vendor_insight_text)
 
     # ━━ Section 4: Capital Forecast ━━
     section("Capital Forecast — Projected Annual Full Turn Spend")
@@ -1532,11 +1642,14 @@ elif view == "1 — Executive Summary":
         )
         st.plotly_chart(fig_fc, use_container_width=True)
 
+        # Compare projected vs actual recent spend
+        actual_2025 = hist_data[hist_data["Year"] == 2025]["total"].iloc[0] if 2025 in hist_data["Year"].values else 0
+        forecast_vs_2025 = ((forecast_spend - actual_2025) / actual_2025 * 100) if actual_2025 > 0 else 0
         insight(
-            f"Based on 2023–2025 trends, the portfolio is projected to complete approximately "
-            f"<strong>{projected_vol_2026:.0f}</strong> Full Turns in 2026 at an average cost of "
-            f"<strong>{fmt(projected_cost_2026)}</strong>, totaling an estimated "
-            f"<strong>{fmt(forecast_spend)}</strong> in capital deployment."
+            f"2026 projection: <strong>{projected_vol_2026:.0f}</strong> Full Turns at "
+            f"<strong>{fmt(projected_cost_2026)}</strong>/turn = <strong>{fmt(forecast_spend)}</strong> total capital. "
+            f"That is <strong>{pct(forecast_vs_2025)}</strong> vs 2025 actual spend of <strong>{fmt(actual_2025)}</strong>. "
+            f"<strong>Action:</strong> {'Budget accordingly for increased capital needs — consider pre-negotiating vendor rates before volume increases.' if forecast_vs_2025 > 10 else 'Spend is projected to hold steady — lock in current vendor pricing to protect margins.' if forecast_vs_2025 >= -10 else 'Declining volume creates an opportunity to be more selective on scope and vendor quality.'}"
         )
 
     # ━━ Section 5: Key Risk Flags ━━
@@ -1610,11 +1723,19 @@ elif view == "1 — Executive Summary":
             )
 
         st.markdown("")  # spacer
+        high_count = len([r for r in risk_items if r["Severity"] == "High"])
+        med_count = len([r for r in risk_items if r["Severity"] == "Medium"])
+        escalation_count = len([r for r in risk_items if r["Risk"] == "Cost Escalation"])
+        cat_inflation_count = len([r for r in risk_items if r["Risk"] == "Category Inflation"])
+        priority_text = []
+        if escalation_count > 0:
+            priority_text.append(f"Investigate the <strong>{escalation_count}</strong> cost escalation {'flags' if escalation_count > 1 else 'flag'} first — pull invoices at those properties and compare scope vs prior year")
+        if cat_inflation_count > 0:
+            priority_text.append(f"Review the <strong>{cat_inflation_count}</strong> category inflation {'items' if cat_inflation_count > 1 else 'item'} — request updated vendor bids or negotiate fixed pricing")
+        action_text = ". ".join(priority_text) + "." if priority_text else "Monitor current metrics through the next quarter."
         insight(
-            f"<strong>{len([r for r in risk_items if r['Severity'] == 'High'])}</strong> high-severity and "
-            f"<strong>{len([r for r in risk_items if r['Severity'] == 'Medium'])}</strong> medium-severity risk "
-            f"flags identified. Cost escalation items should be investigated first — they represent the most "
-            f"immediate impact to capital deployment efficiency."
+            f"<strong>{high_count}</strong> high-severity and <strong>{med_count}</strong> medium-severity flags. "
+            f"<strong>Priority actions:</strong> {action_text}"
         )
     else:
         st.success("No risk flags identified — portfolio metrics are within normal ranges.")
