@@ -200,6 +200,35 @@ st.markdown("""
         font-size: 12px; margin: 0 0 12px 0; color: #64748b;
     }
 
+    /* Multi-year history table */
+    .scope-checklist th.year-col {
+        text-align: right; min-width: 90px; font-variant-numeric: tabular-nums;
+    }
+    .scope-checklist .total-row td {
+        font-weight: 700; font-size: 13px; border-bottom: 2px solid #cbd5e1;
+        background: #f1f5f9; padding: 8px 12px;
+    }
+    .scope-checklist .total-row td:first-child { text-align: left; }
+    .scope-checklist td.year-val {
+        text-align: right; font-variant-numeric: tabular-nums; padding: 6px 12px;
+    }
+    .scope-checklist .row-done td.year-val { font-weight: 600; }
+    .scope-checklist .row-skip td.year-val { color: #cbd5e1; }
+    .scope-checklist .year-subtext {
+        display: block; font-size: 9px; color: #94a3b8; font-weight: 400;
+        text-transform: none; letter-spacing: 0;
+    }
+
+    /* Projected scope — recently-done row state */
+    .scope-checklist .row-recent td {
+        padding: 6px 12px; font-size: 13px; color: #92400e;
+        border-bottom: 1px solid #f1f5f9; background: #fffbeb;
+    }
+    .scope-checklist .row-recent .status { color: #f59e0b; font-weight: 700; }
+    .scope-checklist .row-recent td.year-val {
+        text-align: right; text-decoration: line-through; color: #94a3b8;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -271,6 +300,131 @@ def render_scope_checklist(amounts_map, total, amount_label="Amount"):
         for c in group_cats:
             amt = amounts_map.get(c, 0) if hasattr(amounts_map, "get") else 0
             if amt > 0:
+                rows_html.append(
+                    f'<tr class="row-done">'
+                    f'<td class="status">&#10003;</td>'
+                    f'<td>{c}</td>'
+                    f'<td>{fmt(amt, 2)}</td>'
+                    f'</tr>'
+                )
+            else:
+                rows_html.append(
+                    f'<tr class="row-skip">'
+                    f'<td class="status">—</td>'
+                    f'<td>{c}</td>'
+                    f'<td>—</td>'
+                    f'</tr>'
+                )
+    return (
+        f'<table class="scope-checklist">'
+        f'<thead><tr><th style="width:32px;"></th><th>Category</th><th>{amount_label}</th></tr></thead>'
+        f'<tbody>{"".join(rows_html)}</tbody></table>'
+    )
+
+
+def render_scope_history_table(unit_df, unit_ts):
+    """Build an HTML table showing all historical work on a unit by year and category.
+
+    Rows = 17 budget categories in standard group order.
+    Columns = years with actual turn data, most recent first.
+    """
+    ALL_CATS = CORE_LABOR + CORE_MATERIALS + OTHER_CATS
+    GROUP_CSS = {"Core Labor": "group-hdr-labor", "Core Materials": "group-hdr-matl", "Other": "group-hdr-other"}
+
+    work = unit_df.copy()
+    work["Year"] = work["Move-Out Date"].dt.year
+
+    # Pivot: category × year
+    pivot = work.pivot_table(
+        index="Budget Category", columns="Year",
+        values="Invoice Amount", aggfunc="sum", fill_value=0,
+    )
+
+    # Only keep years with non-zero total spend
+    year_cols = sorted([y for y in pivot.columns if pivot[y].sum() != 0], reverse=True)
+    if not year_cols:
+        return "<p style='color:#64748b;'>No turn history available.</p>", [], {}
+
+    # Turn type labels per year
+    ts_copy = unit_ts.copy()
+    ts_copy["Year"] = ts_copy["Move-Out Date"].dt.year
+    type_labels = ts_copy.groupby("Year")["Turn Type"].apply(lambda x: " / ".join(sorted(x.unique()))).to_dict()
+
+    year_totals = {y: pivot[y].sum() for y in year_cols}
+
+    # Build header row
+    year_hdrs = "".join(
+        f'<th class="year-col">{int(y)}<span class="year-subtext">{type_labels.get(y, "")}</span></th>'
+        for y in year_cols
+    )
+    header = f'<tr><th style="width:32px;"></th><th>Category</th>{year_hdrs}</tr>'
+
+    # Total row
+    total_cells = "".join(f'<td class="year-val">{fmt(year_totals[y])}</td>' for y in year_cols)
+    total_row = f'<tr class="total-row"><td></td><td>Total Per Unit</td>{total_cells}</tr>'
+
+    # Category rows
+    rows_html = [total_row]
+    for group_label, group_cats in [("Core Labor", CORE_LABOR), ("Core Materials", CORE_MATERIALS), ("Other", OTHER_CATS)]:
+        css = GROUP_CSS[group_label]
+        colspan = 2 + len(year_cols)
+        rows_html.append(f'<tr class="group-hdr {css}"><td colspan="{colspan}">{group_label}</td></tr>')
+        for c in group_cats:
+            has_any = any(pivot.loc[c, y] > 0 for y in year_cols) if c in pivot.index else False
+            row_class = "row-done" if has_any else "row-skip"
+            status = "&#10003;" if has_any else "—"
+            cells = ""
+            for y in year_cols:
+                val = pivot.loc[c, y] if c in pivot.index and y in pivot.columns else 0
+                if val > 0:
+                    cells += f'<td class="year-val">{fmt(val)}</td>'
+                elif val < 0:
+                    cells += f'<td class="year-val">{fmt(val)}</td>'
+                else:
+                    cells += f'<td class="year-val" style="color:#cbd5e1;">—</td>'
+            rows_html.append(
+                f'<tr class="{row_class}">'
+                f'<td class="status">{status}</td>'
+                f'<td>{c}</td>'
+                f'{cells}'
+                f'</tr>'
+            )
+
+    html = (
+        f'<table class="scope-checklist">'
+        f'<thead>{header}</thead>'
+        f'<tbody>{"".join(rows_html)}</tbody></table>'
+    )
+    return html, year_cols, year_totals
+
+
+def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year, amount_label="Projected Cost"):
+    """Build an HTML checklist for projected scope with recently-done flagging.
+
+    Three row states:
+      row-done (green ✓): Category projected
+      row-skip (gray —): Not projected
+      row-recent (amber ↻): Projected by comps but recently done on this unit
+    """
+    GROUP_CSS = {"Core Labor": "group-hdr-labor", "Core Materials": "group-hdr-matl", "Other": "group-hdr-other"}
+    rows_html = []
+    for group_label, group_cats in [("Core Labor", CORE_LABOR), ("Core Materials", CORE_MATERIALS), ("Other", OTHER_CATS)]:
+        css = GROUP_CSS[group_label]
+        rows_html.append(f'<tr class="group-hdr {css}"><td colspan="3">{group_label}</td></tr>')
+        for c in group_cats:
+            amt = proj_amounts.get(c, 0) if hasattr(proj_amounts, "get") else 0
+            if c in excluded_recent:
+                # Recently done — show comp amount struck through
+                comp_amt = excluded_recent[c]
+                yr = last_done_year.get(c, "")
+                rows_html.append(
+                    f'<tr class="row-recent">'
+                    f'<td class="status">&#8635;</td>'
+                    f'<td>{c} <span style="font-size:11px;color:#94a3b8;">— done in {yr}</span></td>'
+                    f'<td class="year-val">{fmt(comp_amt, 2)}</td>'
+                    f'</tr>'
+                )
+            elif amt > 0:
                 rows_html.append(
                     f'<tr class="row-done">'
                     f'<td class="status">&#10003;</td>'
@@ -1219,57 +1373,57 @@ elif view == "5 — Unit Search":
                 st.dataframe(disp, use_container_width=True, hide_index=True)
 
         # ══════════════════════════════════════════════════
-        # PRE-SCOPING — MOST RECENT FULL TURN
+        # PRE-SCOPING — UNIT WORK HISTORY
         # ══════════════════════════════════════════════════
         unit_ft = unit_ts[unit_ts["Turn Type"] == "Full Turn"]
+
+        # Compute last Full Turn cost (needed for projected scope comparison)
+        total_last_ft = 0
         if len(unit_ft) > 0:
             last_ft = unit_ft.sort_values("Move-Out Date", ascending=False).iloc[0]
-            last_ft_date = last_ft["Move-Out Date"]
-            last_ft_key = last_ft["Turn Key"]
-            last_ft_items = unit_df[unit_df["Turn Key"] == last_ft_key].copy()
+            last_ft_items = unit_df[unit_df["Turn Key"] == last_ft["Turn Key"]]
+            total_last_ft = last_ft_items["Invoice Amount"].sum()
 
-            section(f"Pre-Scoping — Most Recent Full Turn ({last_ft_date.strftime('%b %Y') if pd.notna(last_ft_date) else '—'})")
+        section("Pre-Scoping — Unit Work History")
 
-            # Category breakdown
-            cat_brkdn = (
-                last_ft_items.groupby("Budget Category")["Invoice Amount"]
-                .sum().reset_index(name="Amount")
-            )
-            total_last_ft = cat_brkdn["Amount"].sum()
+        most_recent = unit_ts.iloc[0]
+        most_recent_date = most_recent["Move-Out Date"]
+        most_recent_type = most_recent["Turn Type"]
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Last Full Turn Cost", fmt(total_last_ft))
-            c2.metric("Move-Out", last_ft_date.strftime("%b %d, %Y") if pd.notna(last_ft_date) else "—")
-            dur_last = last_ft["latest_invoice"] - last_ft_date if pd.notna(last_ft.get("latest_invoice")) and pd.notna(last_ft_date) else pd.NaT
-            c3.metric("Duration", f"{dur_last.days}d" if pd.notna(dur_last) and hasattr(dur_last, "days") and dur_last.days >= 0 else "—")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Lifetime Unit Spend", fmt(unit_ts["total_cost"].sum()))
+        c2.metric("Total Turns", str(len(unit_ts)))
+        c3.metric("Most Recent", f"{most_recent_type} ({most_recent_date.strftime('%b %Y') if pd.notna(most_recent_date) else '—'})")
 
-            # Visual checklist — what was completed on the last Full Turn
-            cat_amounts = cat_brkdn.set_index("Budget Category")["Amount"]
-            completed_count = sum(1 for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS if cat_amounts.get(c, 0) > 0)
-            total_cats = len(CORE_LABOR) + len(CORE_MATERIALS) + len(OTHER_CATS)
-            checklist_html = render_scope_checklist(cat_amounts, total_last_ft, amount_label="Actual Cost")
-            st.markdown(
-                f'<div class="scope-card scope-card-history">'
-                f'<p class="scope-title">Completed Work — {completed_count} of {total_cats} Categories</p>'
-                f'<p class="scope-subtitle">What was done on the last Full Turn for this unit</p>'
-                f'{checklist_html}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        # Multi-year category table — all turn types
+        history_html, hist_years, hist_totals = render_scope_history_table(unit_df, unit_ts)
+        ALL_CATS = CORE_LABOR + CORE_MATERIALS + OTHER_CATS
+        total_cats = len(ALL_CATS)
+        # Count categories ever touched
+        work_pivot = unit_df.copy()
+        work_pivot["Year"] = work_pivot["Move-Out Date"].dt.year
+        cat_ever = work_pivot.groupby("Budget Category")["Invoice Amount"].sum()
+        cats_touched = sum(1 for c in ALL_CATS if cat_ever.get(c, 0) > 0)
 
-            # Vendor summary
-            vendor_brkdn = (
-                last_ft_items.groupby("Vendor Name")["Invoice Amount"]
-                .sum().reset_index(name="Amount")
-                .sort_values("Amount", ascending=False)
-            )
-            vendor_brkdn["Amount"] = vendor_brkdn["Amount"].apply(lambda x: fmt(x, 2))
-            vendor_brkdn.columns = ["Vendor", "Total"]
-            with st.expander("Vendor Breakdown"):
-                st.dataframe(vendor_brkdn, use_container_width=True, hide_index=True)
-        else:
-            section("Pre-Scoping")
-            st.info("No Full Turn history for this unit. See projected costs below for budget guidance.")
+        st.markdown(
+            f'<div class="scope-card scope-card-history">'
+            f'<p class="scope-title">Unit Work History — {cats_touched} of {total_cats} Categories Touched</p>'
+            f'<p class="scope-subtitle">All turns on this unit (Full Turn, Make Ready, Partial Turn) — most recent first</p>'
+            f'{history_html}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Vendor summary — all turns
+        vendor_brkdn = (
+            unit_df.groupby("Vendor Name")["Invoice Amount"]
+            .sum().reset_index(name="Amount")
+            .sort_values("Amount", ascending=False)
+        )
+        vendor_brkdn["Amount"] = vendor_brkdn["Amount"].apply(lambda x: fmt(x, 2))
+        vendor_brkdn.columns = ["Vendor", "Total"]
+        with st.expander("Vendor Breakdown — All Turns"):
+            st.dataframe(vendor_brkdn, use_container_width=True, hide_index=True)
 
         # ══════════════════════════════════════════════════
         # PROJECTED TURN COST
@@ -1355,49 +1509,105 @@ elif view == "5 — Unit Search":
             projected_total = comp_cat["Avg per Turn"].sum()
             proj_amounts = comp_cat.set_index("Budget Category")["Avg per Turn"]
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric(f"Projected {proj_type} Cost", fmt(projected_total))
-            c2.metric("Based on Comps", f"{comp_turn_keys} {proj_type}s")
-            c3.metric("Floor Plan", unit_floor_plan if unit_floor_plan else "—")
+            # ── Recency adjustment — exclude categories done on THIS unit within last 2 years ──
+            RECENCY_CUTOFF_YEARS = 2
+            recency_cutoff = pd.Timestamp.now() - pd.DateOffset(years=RECENCY_CUTOFF_YEARS)
+            recent_unit_work = unit_df[unit_df["Move-Out Date"] >= recency_cutoff].copy()
+            recently_done_agg = (
+                recent_unit_work.groupby("Budget Category")["Invoice Amount"]
+                .sum().reset_index(name="spend")
+            )
+            recently_done_agg = recently_done_agg[recently_done_agg["spend"] > 0]
+            recently_done_cats = set(recently_done_agg["Budget Category"])
+            last_done_year = (
+                recent_unit_work[recent_unit_work["Invoice Amount"] > 0]
+                .groupby("Budget Category")["Move-Out Date"].max().dt.year.to_dict()
+            )
 
-            # Visual checklist — expected scope based on comparable turns
-            expected_count = sum(1 for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS if proj_amounts.get(c, 0) > 0)
+            # Build adjusted amounts — zero out categories recently done on this unit
+            excluded_recent = {}
+            for cat in recently_done_cats:
+                if cat in proj_amounts.index and proj_amounts[cat] > 0:
+                    excluded_recent[cat] = proj_amounts[cat]
+
+            adjusted_amounts = proj_amounts.copy()
+            for cat in excluded_recent:
+                adjusted_amounts[cat] = 0
+            adjusted_total = adjusted_amounts[adjusted_amounts > 0].sum()
+            savings_from_recent = sum(excluded_recent.values())
+
+            # KPIs
+            c1, c2, c3 = st.columns(3)
+            c1.metric(
+                f"Projected {proj_type} Cost", fmt(adjusted_total),
+                f"-{fmt(savings_from_recent)} recent work" if savings_from_recent > 0 else None,
+            )
+            c2.metric("Based on Comps", f"{comp_turn_keys} {proj_type}s")
+            c3.metric("Recently Done", f"{len(excluded_recent)} categories" if excluded_recent else "None")
+
+            if excluded_recent:
+                excluded_names = [f"{c} ({last_done_year.get(c, '?')})" for c in excluded_recent]
+                st.caption(
+                    f"**Adjusted for recent work on this unit:** {', '.join(excluded_names)} "
+                    f"completed within the last {RECENCY_CUTOFF_YEARS} years — "
+                    f"comp average of ${savings_from_recent:,.0f} removed. "
+                    f"Unadjusted baseline: {fmt(projected_total)}."
+                )
+
+            # Visual checklist — projected scope with recently-done flagging
+            expected_count = sum(1 for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS
+                                 if proj_amounts.get(c, 0) > 0 and c not in excluded_recent)
             total_cats = len(CORE_LABOR) + len(CORE_MATERIALS) + len(OTHER_CATS)
-            proj_checklist_html = render_scope_checklist(proj_amounts, projected_total, amount_label="Projected Cost")
+            proj_checklist_html = render_projected_scope_table(
+                proj_amounts, excluded_recent, last_done_year, amount_label="Projected Cost",
+            )
             st.markdown(
                 f'<div class="scope-card scope-card-projected">'
                 f'<p class="scope-title">Recommended Scope — {proj_type} &nbsp;|&nbsp; {expected_count} of {total_cats} Categories</p>'
-                f'<p class="scope-subtitle">Based on {comp_desc}</p>'
+                f'<p class="scope-subtitle">Based on {comp_desc} — adjusted for recent work on this unit</p>'
                 f'{proj_checklist_html}'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
-            # Comparison to last Full Turn if available
-            top_proj_cat = proj_amounts.sort_values(ascending=False)
-            top_proj_name = top_proj_cat.index[0] if len(top_proj_cat) > 0 else "N/A"
-            top_proj_val = top_proj_cat.iloc[0] if len(top_proj_cat) > 0 else 0
-            top_proj_pct = top_proj_val / projected_total * 100 if projected_total > 0 else 0
+            # Budget guidance insight
+            top_adj = adjusted_amounts[adjusted_amounts > 0].sort_values(ascending=False)
+            top_proj_name = top_adj.index[0] if len(top_adj) > 0 else "N/A"
+            top_proj_val = top_adj.iloc[0] if len(top_adj) > 0 else 0
+            top_proj_pct = top_proj_val / adjusted_total * 100 if adjusted_total > 0 else 0
 
-            if has_prior_ft:
-                delta = projected_total - total_last_ft
-                delta_pct = delta / total_last_ft * 100 if total_last_ft > 0 else 0
-                mr_ratio = projected_total / total_last_ft * 100 if total_last_ft > 0 else 0
+            if adjusted_total == 0 and excluded_recent:
+                # All projected categories were recently done on this unit
+                insight(
+                    f"<strong>Budget Guidance:</strong> All comparable {proj_type} categories have been "
+                    f"completed on this unit within the last {RECENCY_CUTOFF_YEARS} years — "
+                    f"<strong>{len(excluded_recent)}</strong> categories totaling "
+                    f"<strong>{fmt(savings_from_recent)}</strong> (comp average) excluded. "
+                    f"Unadjusted baseline was <strong>{fmt(projected_total)}</strong>. "
+                    f"<strong>Action:</strong> Minimal scope expected — confirm unit condition with "
+                    f"a physical walkthrough before authorizing any work orders."
+                )
+            elif has_prior_ft:
+                mr_ratio = adjusted_total / total_last_ft * 100 if total_last_ft > 0 else 0
+                recent_note = (
+                    f" <strong>{len(excluded_recent)}</strong> categories were recently completed on this unit "
+                    f"and excluded from the projection (saving <strong>{fmt(savings_from_recent)}</strong>)."
+                    if excluded_recent else ""
+                )
                 insight(
                     f"<strong>Budget Guidance:</strong> Projected <strong>{proj_type}</strong> cost is "
-                    f"<strong>{fmt(projected_total)}</strong> — <strong>{mr_ratio:.0f}%</strong> of the "
-                    f"last Full Turn (<strong>{fmt(total_last_ft)}</strong>). "
-                    f"The largest projected line item is <strong>{top_proj_name}</strong> at "
+                    f"<strong>{fmt(adjusted_total)}</strong> — <strong>{mr_ratio:.0f}%</strong> of the "
+                    f"last Full Turn (<strong>{fmt(total_last_ft)}</strong>).{recent_note} "
+                    f"The largest remaining line item is <strong>{top_proj_name}</strong> at "
                     f"<strong>{fmt(top_proj_val)}</strong> ({top_proj_pct:.0f}% of total). "
                     f"<strong>Action:</strong> Get competitive bids on {top_proj_name} to keep this "
-                    f"Make Ready under <strong>{fmt(projected_total * 0.9)}</strong> (10% savings target)."
+                    f"{proj_type} under <strong>{fmt(adjusted_total * 0.9)}</strong> (10% savings target)."
                 )
             else:
-                # Portfolio avg for same turn type
                 port_avg_type = ft_turns["total_cost"].mean() if proj_type == "Full Turn" else 0
                 vs_port = ""
                 if port_avg_type > 0:
-                    diff_pct = (projected_total - port_avg_type) / port_avg_type * 100
+                    diff_pct = (adjusted_total - port_avg_type) / port_avg_type * 100
                     position = "above" if diff_pct > 0 else "below"
                     vs_port = (
                         f" This is <strong>{abs(diff_pct):.0f}%</strong> {position} the portfolio "
@@ -1405,7 +1615,7 @@ elif view == "5 — Unit Search":
                     )
                 insight(
                     f"<strong>Budget Guidance:</strong> Projected <strong>{proj_type}</strong> cost is "
-                    f"<strong>{fmt(projected_total)}</strong> based on <strong>{comp_desc}</strong>.{vs_port} "
+                    f"<strong>{fmt(adjusted_total)}</strong> based on <strong>{comp_desc}</strong>.{vs_port} "
                     f"The largest projected line item is <strong>{top_proj_name}</strong> at "
                     f"<strong>{fmt(top_proj_val)}</strong> ({top_proj_pct:.0f}% of total). "
                     f"<strong>Action:</strong> Prioritize scope validation on the top 3 categories — "
