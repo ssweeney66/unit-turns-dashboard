@@ -153,6 +153,53 @@ st.markdown("""
         background: rgba(37,99,235,0.15) !important; border-radius: 6px;
     }
 
+    /* ── Scope Checklist tables ── */
+    .scope-checklist { width: 100%; border-collapse: collapse; margin: 0 0 8px 0; font-family: 'Inter', sans-serif; }
+    .scope-checklist th {
+        text-align: left; font-size: 11px; text-transform: uppercase;
+        letter-spacing: 0.5px; color: #64748b; font-weight: 600;
+        padding: 8px 12px; border-bottom: 2px solid #e2e8f0; background: #f8fafc;
+    }
+    .scope-checklist th:last-child { text-align: right; }
+    .scope-checklist .group-hdr td {
+        font-weight: 700; font-size: 12px; text-transform: uppercase;
+        letter-spacing: 0.5px; padding: 10px 12px 6px 12px; border-bottom: none;
+    }
+    .scope-checklist .group-hdr-labor td   { color: #1e40af; border-top: 3px solid #2563eb; }
+    .scope-checklist .group-hdr-matl td    { color: #047857; border-top: 3px solid #10b981; }
+    .scope-checklist .group-hdr-other td   { color: #6d28d9; border-top: 3px solid #7c3aed; }
+    .scope-checklist .row-done td {
+        padding: 6px 12px; font-size: 13px; color: #1e293b;
+        border-bottom: 1px solid #f1f5f9;
+    }
+    .scope-checklist .row-done .status { color: #16a34a; font-weight: 700; }
+    .scope-checklist .row-done td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .scope-checklist .row-skip td {
+        padding: 6px 12px; font-size: 13px; color: #94a3b8;
+        border-bottom: 1px solid #f1f5f9;
+    }
+    .scope-checklist .row-skip .status { color: #cbd5e1; }
+    .scope-checklist .row-skip td:last-child { text-align: right; }
+
+    /* Section wrappers for Pre-Scoping vs Projected */
+    .scope-card {
+        border-radius: 10px; padding: 20px 24px; margin: 12px 0 20px 0;
+    }
+    .scope-card-history {
+        background: #f0f7ff; border: 1px solid #bfdbfe; border-left: 5px solid #2563eb;
+    }
+    .scope-card-projected {
+        background: #fffbeb; border: 1px solid #fde68a; border-left: 5px solid #f59e0b;
+    }
+    .scope-card .scope-title {
+        font-size: 14px; font-weight: 700; margin: 0 0 4px 0;
+    }
+    .scope-card-history .scope-title { color: #1e40af; }
+    .scope-card-projected .scope-title { color: #92400e; }
+    .scope-card .scope-subtitle {
+        font-size: 12px; margin: 0 0 12px 0; color: #64748b;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -194,6 +241,55 @@ def footer():
         'Prepared for Executive Review'
         '</div>',
         unsafe_allow_html=True,
+    )
+
+
+def render_scope_checklist(amounts_map, total, amount_label="Amount"):
+    """Build an HTML checklist table for Pre-Scoping / Projected Turn Cost.
+
+    Parameters
+    ----------
+    amounts_map : dict-like – Budget Category → dollar amount (0 = not done)
+    total : float – total spend (for reference, not displayed in table)
+    amount_label : str – header for the amount column
+
+    Returns an HTML string.
+    """
+    GROUP_CSS = {
+        "Core Labor": "group-hdr-labor",
+        "Core Materials": "group-hdr-matl",
+        "Other": "group-hdr-other",
+    }
+    rows_html = []
+    for group_label, group_cats in [
+        ("Core Labor", CORE_LABOR),
+        ("Core Materials", CORE_MATERIALS),
+        ("Other", OTHER_CATS),
+    ]:
+        css = GROUP_CSS[group_label]
+        rows_html.append(f'<tr class="group-hdr {css}"><td colspan="3">{group_label}</td></tr>')
+        for c in group_cats:
+            amt = amounts_map.get(c, 0) if hasattr(amounts_map, "get") else 0
+            if amt > 0:
+                rows_html.append(
+                    f'<tr class="row-done">'
+                    f'<td class="status">&#10003;</td>'
+                    f'<td>{c}</td>'
+                    f'<td>{fmt(amt, 2)}</td>'
+                    f'</tr>'
+                )
+            else:
+                rows_html.append(
+                    f'<tr class="row-skip">'
+                    f'<td class="status">—</td>'
+                    f'<td>{c}</td>'
+                    f'<td>—</td>'
+                    f'</tr>'
+                )
+    return (
+        f'<table class="scope-checklist">'
+        f'<thead><tr><th style="width:32px;"></th><th>Category</th><th>{amount_label}</th></tr></thead>'
+        f'<tbody>{"".join(rows_html)}</tbody></table>'
     )
 
 
@@ -1000,37 +1096,19 @@ elif view == "5 — Unit Search":
             dur_last = last_ft["latest_invoice"] - last_ft_date if pd.notna(last_ft.get("latest_invoice")) and pd.notna(last_ft_date) else pd.NaT
             c3.metric("Duration", f"{dur_last.days}d" if pd.notna(dur_last) and hasattr(dur_last, "days") and dur_last.days >= 0 else "—")
 
-            # Checklist: ALL categories in constant order, mark completed vs not
+            # Visual checklist — what was completed on the last Full Turn
             cat_amounts = cat_brkdn.set_index("Budget Category")["Amount"]
             completed_count = sum(1 for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS if cat_amounts.get(c, 0) > 0)
             total_cats = len(CORE_LABOR) + len(CORE_MATERIALS) + len(OTHER_CATS)
-            st.caption(f"✓ {completed_count} of {total_cats} categories completed on last Full Turn")
-            for group_label, group_cats in [
-                ("Core Labor", CORE_LABOR),
-                ("Core Materials", CORE_MATERIALS),
-                ("Other", OTHER_CATS),
-            ]:
-                rows = []
-                subtotal = 0
-                for c in group_cats:
-                    amt = cat_amounts.get(c, 0)
-                    done = amt > 0
-                    subtotal += amt
-                    rows.append({
-                        "✓": "✓" if done else "—",
-                        "Budget Category": c,
-                        "Amount": fmt(amt, 2) if done else "—",
-                        "% of Total": f"{amt / total_last_ft * 100:.0f}%" if done and total_last_ft > 0 else "—",
-                    })
-                rows.append({
-                    "✓": "",
-                    "Budget Category": f"{group_label} Subtotal",
-                    "Amount": fmt(subtotal, 2),
-                    "% of Total": f"{subtotal / total_last_ft * 100:.0f}%" if total_last_ft > 0 else "—",
-                })
-                gdf = pd.DataFrame(rows)
-                st.markdown(f"**{group_label}**")
-                st.dataframe(gdf, use_container_width=True, hide_index=True)
+            checklist_html = render_scope_checklist(cat_amounts, total_last_ft, amount_label="Actual Cost")
+            st.markdown(
+                f'<div class="scope-card scope-card-history">'
+                f'<p class="scope-title">Completed Work — {completed_count} of {total_cats} Categories</p>'
+                f'<p class="scope-subtitle">What was done on the last Full Turn for this unit</p>'
+                f'{checklist_html}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
             # Vendor summary
             vendor_brkdn = (
@@ -1095,37 +1173,18 @@ elif view == "5 — Unit Search":
             c2.metric("Based on Comps", f"{comp_turn_keys} {proj_type}s")
             c3.metric("Floor Plan", unit_floor_plan if unit_floor_plan else "—")
 
-            # Checklist scope of work: ALL categories in constant order
-            st.markdown(f"**Recommended Scope of Work — {proj_type}**")
+            # Visual checklist — expected scope based on comparable turns
             expected_count = sum(1 for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS if proj_amounts.get(c, 0) > 0)
             total_cats = len(CORE_LABOR) + len(CORE_MATERIALS) + len(OTHER_CATS)
-            st.caption(f"✓ {expected_count} of {total_cats} categories expected based on comparable turns")
-            for group_label, group_cats in [
-                ("Core Labor", CORE_LABOR),
-                ("Core Materials", CORE_MATERIALS),
-                ("Other", OTHER_CATS),
-            ]:
-                rows = []
-                subtotal = 0
-                for c in group_cats:
-                    amt = proj_amounts.get(c, 0)
-                    expected = amt > 0
-                    subtotal += amt
-                    rows.append({
-                        "✓": "✓" if expected else "—",
-                        "Budget Category": c,
-                        "Projected Cost": fmt(amt) if expected else "—",
-                        "% of Total": f"{amt / projected_total * 100:.0f}%" if expected and projected_total > 0 else "—",
-                    })
-                rows.append({
-                    "✓": "",
-                    "Budget Category": f"{group_label} Subtotal",
-                    "Projected Cost": fmt(subtotal),
-                    "% of Total": f"{subtotal / projected_total * 100:.0f}%" if projected_total > 0 else "—",
-                })
-                gdf = pd.DataFrame(rows)
-                st.markdown(f"**{group_label}**")
-                st.dataframe(gdf, use_container_width=True, hide_index=True)
+            proj_checklist_html = render_scope_checklist(proj_amounts, projected_total, amount_label="Projected Cost")
+            st.markdown(
+                f'<div class="scope-card scope-card-projected">'
+                f'<p class="scope-title">Recommended Scope — {proj_type} &nbsp;|&nbsp; {expected_count} of {total_cats} Categories</p>'
+                f'<p class="scope-subtitle">Based on {comp_turn_keys} comparable {proj_type}s for {unit_floor_plan} units at {prop_choice} (last 2 years)</p>'
+                f'{proj_checklist_html}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
             # Comparison to last Full Turn if available
             if has_prior_ft:
