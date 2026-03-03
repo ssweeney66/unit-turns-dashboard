@@ -991,7 +991,6 @@ elif view == "5 — Unit Search":
             cat_brkdn = (
                 last_ft_items.groupby("Budget Category")["Invoice Amount"]
                 .sum().reset_index(name="Amount")
-                .sort_values("Amount", ascending=False)
             )
             total_last_ft = cat_brkdn["Amount"].sum()
 
@@ -1001,11 +1000,24 @@ elif view == "5 — Unit Search":
             dur_last = last_ft["latest_invoice"] - last_ft_date if pd.notna(last_ft.get("latest_invoice")) and pd.notna(last_ft_date) else pd.NaT
             c3.metric("Duration", f"{dur_last.days}d" if pd.notna(dur_last) and hasattr(dur_last, "days") and dur_last.days >= 0 else "—")
 
-            cat_display = cat_brkdn.copy()
-            cat_display["Share"] = (cat_display["Amount"] / total_last_ft * 100).apply(lambda x: f"{x:.0f}%") if total_last_ft > 0 else "—"
-            cat_display["Amount"] = cat_display["Amount"].apply(lambda x: fmt(x, 2))
-            cat_display.columns = ["Budget Category", "Amount", "% of Total"]
-            st.dataframe(cat_display, use_container_width=True, hide_index=True)
+            # Grouped display: Core Labor → Core Materials → Other
+            cat_amounts = cat_brkdn.set_index("Budget Category")["Amount"]
+            for group_label, group_cats in [
+                ("Core Labor", CORE_LABOR),
+                ("Core Materials", CORE_MATERIALS),
+                ("Other", OTHER_CATS),
+            ]:
+                group_data = [(c, cat_amounts.get(c, 0)) for c in group_cats if cat_amounts.get(c, 0) > 0]
+                if not group_data:
+                    continue
+                group_data.sort(key=lambda x: x[1], reverse=True)
+                subtotal = sum(v for _, v in group_data)
+                rows = [{"Budget Category": c, "Amount": v, "% of Total": f"{v / total_last_ft * 100:.0f}%" if total_last_ft > 0 else "—"} for c, v in group_data]
+                rows.append({"Budget Category": f"{group_label} Subtotal", "Amount": subtotal, "% of Total": f"{subtotal / total_last_ft * 100:.0f}%" if total_last_ft > 0 else "—"})
+                gdf = pd.DataFrame(rows)
+                gdf["Amount"] = gdf["Amount"].apply(lambda x: fmt(x, 2))
+                st.markdown(f"**{group_label}**")
+                st.dataframe(gdf, use_container_width=True, hide_index=True)
 
             # Vendor summary
             vendor_brkdn = (
@@ -1062,35 +1074,32 @@ elif view == "5 — Unit Search":
                 .sum().reset_index(name="total_spend")
             )
             comp_cat["Avg per Turn"] = comp_cat["total_spend"] / comp_turn_keys
-            comp_cat = comp_cat.sort_values("Avg per Turn", ascending=False)
             projected_total = comp_cat["Avg per Turn"].sum()
-
-            # Cost type summary
-            comp_ct = (
-                comp_lines.groupby("Cost Type")["Invoice Amount"]
-                .sum().reset_index(name="total_spend")
-            )
-            comp_ct["Avg per Turn"] = comp_ct["total_spend"] / comp_turn_keys
+            proj_amounts = comp_cat.set_index("Budget Category")["Avg per Turn"]
 
             c1, c2, c3 = st.columns(3)
             c1.metric(f"Projected {proj_type} Cost", fmt(projected_total))
             c2.metric("Based on Comps", f"{comp_turn_keys} {proj_type}s")
             c3.metric("Floor Plan", unit_floor_plan if unit_floor_plan else "—")
 
-            # Projected scope of work table
+            # Grouped scope of work: Core Labor → Core Materials → Other
             st.markdown(f"**Recommended Scope of Work — {proj_type}**")
-            scope_display = comp_cat[comp_cat["Avg per Turn"] > 0][["Budget Category", "Avg per Turn"]].copy()
-            scope_display["Share"] = (scope_display["Avg per Turn"] / projected_total * 100).apply(lambda x: f"{x:.0f}%") if projected_total > 0 else "—"
-            scope_display["Avg per Turn"] = scope_display["Avg per Turn"].apply(fmt)
-            scope_display.columns = ["Budget Category", "Projected Cost", "% of Total"]
-            st.dataframe(scope_display, use_container_width=True, hide_index=True)
-
-            # Cost type summary row
-            ct_display = comp_ct[comp_ct["Avg per Turn"] > 0][["Cost Type", "Avg per Turn"]].copy()
-            ct_display["Avg per Turn"] = ct_display["Avg per Turn"].apply(fmt)
-            ct_display.columns = ["Cost Type", "Projected Cost"]
-            with st.expander("By Cost Type"):
-                st.dataframe(ct_display, use_container_width=True, hide_index=True)
+            for group_label, group_cats in [
+                ("Core Labor", CORE_LABOR),
+                ("Core Materials", CORE_MATERIALS),
+                ("Other", OTHER_CATS),
+            ]:
+                group_data = [(c, proj_amounts.get(c, 0)) for c in group_cats if proj_amounts.get(c, 0) > 0]
+                if not group_data:
+                    continue
+                group_data.sort(key=lambda x: x[1], reverse=True)
+                subtotal = sum(v for _, v in group_data)
+                rows = [{"Budget Category": c, "Projected Cost": v, "% of Total": f"{v / projected_total * 100:.0f}%" if projected_total > 0 else "—"} for c, v in group_data]
+                rows.append({"Budget Category": f"{group_label} Subtotal", "Projected Cost": subtotal, "% of Total": f"{subtotal / projected_total * 100:.0f}%" if projected_total > 0 else "—"})
+                gdf = pd.DataFrame(rows)
+                gdf["Projected Cost"] = gdf["Projected Cost"].apply(fmt)
+                st.markdown(f"**{group_label}**")
+                st.dataframe(gdf, use_container_width=True, hide_index=True)
 
             # Comparison to last Full Turn if available
             if has_prior_ft:
