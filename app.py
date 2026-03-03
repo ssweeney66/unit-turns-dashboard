@@ -2092,20 +2092,122 @@ elif view == "6 — Data Review LLM":
         for v, row in vendor_stats.head(15).iterrows():
             lines.append(f"  {v}: ${row['sum']:,.0f} total, {int(row['count'])} invoices")
 
+        # ── A. All Turn Types Summary ──
+        lines.append("\n=== ALL TURN TYPES (not just Full Turns) ===")
+        all_ts = _df_all.copy()
+        all_ts["Turn Key"] = all_ts["UID"] + "|" + all_ts["Move-Out Date"].astype(str)
+        turn_type_stats = all_ts.groupby("Turn Type").agg(
+            total_spend=("Invoice Amount", "sum"),
+            turns=("Turn Key", "nunique"),
+        )
+        for tt, row in turn_type_stats.iterrows():
+            avg = row["total_spend"] / row["turns"] if row["turns"] > 0 else 0
+            lines.append(f"  {tt}: {row['turns']} turns, avg ${avg:,.0f}, total ${row['total_spend']:,.0f}")
+
+        # ── B. Cost Type Breakdown ──
+        lines.append("\n=== COST TYPE BREAKDOWN (Full Turns) ===")
+        if "Cost Type" in _ft_lines.columns:
+            ft_total_spend = _ft_lines["Invoice Amount"].sum()
+            ct_stats = _ft_lines.groupby("Cost Type")["Invoice Amount"].agg(["sum", "count"]).sort_values("sum", ascending=False)
+            num_ft = len(_ft_turns)
+            for ct, row in ct_stats.iterrows():
+                pct = row["sum"] / ft_total_spend * 100 if ft_total_spend > 0 else 0
+                avg_per_turn = row["sum"] / num_ft if num_ft > 0 else 0
+                lines.append(f"  {ct}: ${row['sum']:,.0f} ({pct:.1f}% of spend), ${avg_per_turn:,.0f} avg/turn, {int(row['count'])} invoices")
+
+        # ── C. Property × Year Matrix ──
+        lines.append("\n=== PROPERTY × YEAR DETAIL (Full Turns) ===")
+        py_stats = _ft_turns.groupby(["Property Name", "Year"]).agg(
+            turns=("Turn Key", "count"),
+            avg_cost=("total_cost", "mean"),
+            total_spend=("total_cost", "sum"),
+        )
+        for (prop, yr), row in py_stats.iterrows():
+            lines.append(f"  {prop} | {int(yr)}: {row['turns']} turns, avg ${row['avg_cost']:,.0f}, total ${row['total_spend']:,.0f}")
+
+        # ── D. Duration by Property ──
+        lines.append("\n=== DURATION BY PROPERTY (Full Turns, days) ===")
+        dur_by_prop = _ft_turns.dropna(subset=["Duration"]).groupby("Property Name")["Duration"].agg(["mean", "median", "min", "max"])
+        dur_by_prop = dur_by_prop.loc[sorted(dur_by_prop.index, key=lambda n: _PROP_RANK.get(n, 999))]
+        for prop, row in dur_by_prop.iterrows():
+            lines.append(f"  {prop}: avg {row['mean']:.0f}d, median {row['median']:.0f}d, range {row['min']:.0f}–{row['max']:.0f}d")
+
+        # ── E. Category × Year Trends ──
+        lines.append("\n=== BUDGET CATEGORY × YEAR TRENDS (Full Turns) ===")
+        _ft_lines_yr = _ft_lines.copy()
+        _ft_lines_yr["Year"] = _ft_lines_yr["Move-Out Date"].dt.year
+        cat_yr = _ft_lines_yr.groupby(["Budget Category", "Year"])["Invoice Amount"].sum().reset_index(name="total")
+        turns_per_yr = _ft_turns.groupby("Year")["Turn Key"].count()
+        for (cat, yr), row_val in cat_yr.set_index(["Budget Category", "Year"]).iterrows():
+            n = turns_per_yr.get(yr, 1)
+            avg = row_val["total"] / n if n > 0 else 0
+            lines.append(f"  {cat} | {int(yr)}: ${row_val['total']:,.0f} total, ${avg:,.0f} avg/turn")
+
+        # ── F. Property × Category Top Spend ──
+        lines.append("\n=== TOP 5 CATEGORIES BY PROPERTY (Full Turns) ===")
+        prop_cat = _ft_lines.groupby(["Property Name", "Budget Category"])["Invoice Amount"].sum().reset_index(name="total")
+        for prop in sorted(_ft_turns["Property Name"].unique(), key=lambda n: _PROP_RANK.get(n, 999)):
+            p_cats = prop_cat[prop_cat["Property Name"] == prop].sort_values("total", ascending=False).head(5)
+            cats_str = "; ".join(f"{r['Budget Category']}: ${r['total']:,.0f}" for _, r in p_cats.iterrows())
+            lines.append(f"  {prop}: {cats_str}")
+
+        # ── G. Unit Turnover Stats ──
+        lines.append("\n=== REPEAT TURNERS — Units with Most Full Turns (Top 10) ===")
+        unit_counts = _ft_turns.groupby(["Property Name", "Unit Label"]).agg(
+            turns=("Turn Key", "count"),
+            total_spend=("total_cost", "sum"),
+            avg_cost=("total_cost", "mean"),
+        ).sort_values("turns", ascending=False)
+        for (prop, unit), row in unit_counts.head(10).iterrows():
+            lines.append(f"  {prop} Unit {unit}: {row['turns']} turns, avg ${row['avg_cost']:,.0f}, total ${row['total_spend']:,.0f}")
+
+        lines.append("\n=== HIGHEST-COST SINGLE TURNS (Top 10) ===")
+        top_cost = _ft_turns.nlargest(10, "total_cost")
+        for _, row in top_cost.iterrows():
+            dt = row["Move-Out Date"].strftime("%b %Y") if pd.notna(row["Move-Out Date"]) else "—"
+            lines.append(f"  {row['Property Name']} Unit {row['Unit Label']} ({dt}): ${row['total_cost']:,.0f}")
+
+        # ── H. Floor Plan Detail by Property ──
+        lines.append("\n=== FLOOR PLAN DETAIL BY PROPERTY (Full Turns) ===")
+        fp_prop = _ft_turns.groupby(["Property Name", "Floor Plan"]).agg(
+            turns=("Turn Key", "count"),
+            avg_cost=("total_cost", "mean"),
+        ).reset_index()
+        for prop in sorted(_ft_turns["Property Name"].unique(), key=lambda n: _PROP_RANK.get(n, 999)):
+            p_fp = fp_prop[fp_prop["Property Name"] == prop].sort_values("turns", ascending=False).head(3)
+            fp_str = "; ".join(f"{r['Floor Plan']}: {r['turns']} turns, avg ${r['avg_cost']:,.0f}" for _, r in p_fp.iterrows())
+            lines.append(f"  {prop}: {fp_str}")
+
         return "\n".join(lines)
 
     data_context = build_data_context(ft_turns, ft_lines, _df_all)
 
-    SYSTEM_PROMPT = f"""You are a senior multifamily real estate analytics assistant embedded in a Full Turn renovation dashboard.
-Your role is to answer questions about this portfolio's renovation (Full Turn) data with precision, clarity, and executive-level insight.
+    SYSTEM_PROMPT = f"""You are a senior multifamily real estate analytics assistant embedded in a renovation dashboard for a 14-property multifamily real estate portfolio.
+Your role is to answer questions about this portfolio's renovation data with precision, clarity, and executive-level insight.
 
 Key definitions:
-- Full Turn: A complete unit renovation after a tenant moves out (avg $15-23K)
+- Full Turn: A complete unit renovation after a tenant moves out — largest scope and cost
+- Make Ready: A lighter-touch refresh between tenants — targeted scope (paint, cleaning, minor repairs)
+- Partial Turn: Work done on a unit outside of a full move-out cycle
 - Turn Key: Unique identifier for each turn event (Property + Unit + Move-Out Date)
 - Duration: Days from move-out to last invoice (renovation timeline)
-- Budget Categories: 17 categories split into Materials (Supplies, Appliances, Flooring Materials, Cabinets Materials, Countertops Materials, Windows) and Labor (Labor General, Flooring Labor, Electric General, Countertops Labor, Plumbing, Powerwash and Demo, Management Fee, Scrape Ceiling, Glaze, Cabinets Labor, Paint)
+- Cost Types: Materials, Labor, Mixed, Fee — every invoice line is classified into one of these
+- Budget Categories (17 total):
+  Materials: Supplies, Appliances, Flooring Materials, Cabinets Materials, Countertops Materials, Windows
+  Labor: Labor General, Flooring Labor, Electric General, Countertops Labor, Plumbing, Powerwash and Demo, Management Fee, Scrape Ceiling, Glaze, Cabinets Labor, Paint
 
-Here is the current portfolio data summary:
+Available data below includes:
+- Portfolio overview and yearly trends
+- Property breakdown and property × year detail (turn counts, avg cost, total spend)
+- All 17 budget categories ranked by spend, plus category × year trends
+- Cost type breakdown (Materials vs Labor vs Mixed vs Fee)
+- Duration statistics by property
+- All turn types (Full Turn, Make Ready, Partial Turn) — counts and costs
+- Top categories by property, floor plan detail by property
+- Repeat turners (units with most Full Turns) and highest-cost single turns
+- Vendor summary and floor plan mix
+
+Here is the portfolio data:
 
 {data_context}
 
@@ -2115,8 +2217,10 @@ Guidelines:
 - If you're unsure or the data doesn't support an answer, say so clearly
 - Provide actionable insights when relevant
 - Keep responses concise but thorough (3-5 sentences for simple questions, more for complex analysis)
-- When comparing properties, always rank them
-- Use percentage changes for YoY comparisons"""
+- When comparing properties, always rank them by the relevant metric
+- Use percentage changes for year-over-year comparisons
+- Cross-reference dimensions when useful (e.g. property + year + category)
+- If asked about a specific unit, note that you have aggregate data only — refer them to the Unit Search tab for unit-level detail"""
 
     # ── Provider & model config ──
     PROVIDERS = {
