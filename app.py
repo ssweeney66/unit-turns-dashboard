@@ -711,6 +711,59 @@ if view == "3 — Property Summary":
                 d["Line Item Notes"] = d["Line Item Notes"].fillna("")
                 st.dataframe(d, use_container_width=True, hide_index=True)
 
+    # ══════════════════════════════════════════════════
+    # CATEGORY OUTLIERS — THIS PROPERTY
+    # ══════════════════════════════════════════════════
+    section(f"Category Outliers — {prop}")
+    st.caption(
+        f"Turns where a budget category exceeded the {prop} average by more than 1.5 standard deviations "
+        f"(minimum 3 observations required)."
+    )
+
+    # Build per-category stats for this property
+    prop_cat = (
+        p_lines.groupby(["Budget Category", "Turn Key"])["Invoice Amount"]
+        .sum().reset_index()
+    )
+    prop_cat_stats = (
+        prop_cat.groupby("Budget Category")["Invoice Amount"]
+        .agg(["mean", "std", "count"]).reset_index()
+    )
+    prop_cat_stats["threshold"] = prop_cat_stats["mean"] + 1.5 * prop_cat_stats["std"]
+
+    flagged = prop_cat.merge(prop_cat_stats, on="Budget Category")
+    flagged = flagged[
+        (flagged["Invoice Amount"] > flagged["threshold"])
+        & (flagged["count"] >= 3)
+    ].copy()
+    flagged["Excess"] = flagged["Invoice Amount"] - flagged["mean"]
+
+    turn_info = p_turns[["Turn Key", "Unit Label", "Move-Out Date"]].drop_duplicates("Turn Key")
+    flagged = flagged.merge(turn_info, on="Turn Key", how="left")
+    flagged = flagged.sort_values("Excess", ascending=False)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Outlier Flags", len(flagged))
+    c2.metric("Total Excess Spend", fmt(flagged["Excess"].sum()) if len(flagged) else "$0")
+    top_cat = flagged.groupby("Budget Category")["Excess"].sum().idxmax() if len(flagged) else "None"
+    c3.metric("Top Flagged Category", top_cat)
+
+    if len(flagged) > 0:
+        o_display = flagged[[
+            "Unit Label", "Move-Out Date", "Budget Category",
+            "Invoice Amount", "mean", "Excess"
+        ]].copy()
+        o_display["Move-Out Date"] = o_display["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
+        o_display["Invoice Amount"] = o_display["Invoice Amount"].apply(fmt)
+        o_display["mean"] = o_display["mean"].apply(fmt)
+        o_display["Excess"] = o_display["Excess"].apply(fmt)
+        o_display.columns = ["Unit", "Move-Out", "Category", "Actual",
+                              f"{prop} Avg", "Excess"]
+        st.dataframe(o_display, use_container_width=True, hide_index=True,
+                     height=min(400, 60 + len(flagged) * 35))
+    else:
+        st.success(f"No category outliers detected at {prop}.")
+
     footer()
 
 
@@ -926,60 +979,6 @@ elif view == "4 — Category Trends":
     st.markdown("")
     render_category_table("Other Categories (Avg per Turn)", OTHER_CATS, cat_year_spend,
                           years=TREND_YEARS, year_labels=TREND_YEAR_LABELS)
-
-    # ══════════════════════════════════════════════════
-    # CATEGORY OUTLIERS — LAST 12 MONTHS
-    # ══════════════════════════════════════════════════
-    section("Category Outliers — Last 12 Months")
-    st.caption("Per-property category spend exceeding mean + 1.5 standard deviations on recent Full Turns.")
-
-    ft_all = ft_lines.copy()
-    prop_cat = (
-        ft_all.groupby(["Property Name", "Budget Category", "Turn Key"])["Invoice Amount"]
-        .sum().reset_index()
-    )
-    prop_cat_stats = (
-        prop_cat.groupby(["Property Name", "Budget Category"])["Invoice Amount"]
-        .agg(["mean", "std", "count"]).reset_index()
-    )
-    prop_cat_stats["threshold"] = prop_cat_stats["mean"] + 1.5 * prop_cat_stats["std"]
-
-    flagged = prop_cat.merge(prop_cat_stats, on=["Property Name", "Budget Category"])
-    flagged = flagged[
-        (flagged["Invoice Amount"] > flagged["threshold"])
-        & (flagged["count"] >= 3)
-    ].copy()
-    flagged["Excess"] = flagged["Invoice Amount"] - flagged["mean"]
-
-    turn_info = ft_turns[["Turn Key", "Property Name", "Unit Label", "Move-Out Date"]].drop_duplicates("Turn Key")
-    flagged = flagged.merge(turn_info, on=["Turn Key", "Property Name"], how="left")
-
-    cutoff_12m = pd.Timestamp.now() - pd.DateOffset(months=12)
-    recent_outliers = flagged[flagged["Move-Out Date"] >= cutoff_12m].copy()
-    recent_outliers["_order"] = prop_sort_key(recent_outliers["Property Name"])
-    recent_outliers = recent_outliers.sort_values(["_order", "Excess"], ascending=[True, False]).drop(columns="_order")
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Outlier Flags", len(recent_outliers))
-    c2.metric("Total Excess Spend", fmt(recent_outliers["Excess"].sum()) if len(recent_outliers) else "$0")
-    top_cat = recent_outliers.groupby("Budget Category")["Excess"].sum().idxmax() if len(recent_outliers) else "None"
-    c3.metric("Top Flagged Category", top_cat)
-
-    if len(recent_outliers) > 0:
-        r_display = recent_outliers[[
-            "Property Name", "Unit Label", "Move-Out Date", "Budget Category",
-            "Invoice Amount", "mean", "Excess"
-        ]].copy()
-        r_display["Move-Out Date"] = r_display["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
-        r_display["Invoice Amount"] = r_display["Invoice Amount"].apply(fmt)
-        r_display["mean"] = r_display["mean"].apply(fmt)
-        r_display["Excess"] = r_display["Excess"].apply(fmt)
-        r_display.columns = ["Property", "Unit", "Move-Out", "Category",
-                              "Actual", "Property Avg", "Excess"]
-        st.dataframe(r_display, use_container_width=True, hide_index=True,
-                     height=min(400, 60 + len(recent_outliers) * 35))
-    else:
-        st.success("No category outliers detected in the past 12 months.")
 
     # ══════════════════════════════════════════════════
     # NARRATIVE INSIGHT
