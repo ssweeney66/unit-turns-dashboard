@@ -821,14 +821,14 @@ elif view == "2 — Portfolio Overview":
         .reindex(columns=SUMMARY_YEARS, fill_value=0)
     )
 
-    # All-years avg
-    avg_matrix["Avg (All Years)"] = avg_matrix[SUMMARY_YEARS].replace(0, np.nan).mean(axis=1)
-
     # YoY change
     avg_matrix["2024 → 2025"] = avg_matrix.apply(
         lambda r: ((r[2025] - r[2024]) / r[2024] * 100) if r[2024] > 0 and r[2025] > 0 else np.nan,
         axis=1,
     )
+
+    # Trailing 5-year avg (far-right column)
+    avg_matrix["Avg (5-Yr)"] = avg_matrix[TREND_YEARS].replace(0, np.nan).mean(axis=1)
 
     avg_matrix = avg_matrix.loc[sorted(avg_matrix.index, key=lambda n: _PROP_RANK.get(n, 999))]
 
@@ -837,39 +837,51 @@ elif view == "2 — Portfolio Overview":
     for y in SUMMARY_YEARS:
         yr_data = recent[recent["Year"] == y]["total_cost"]
         portfolio_row[y] = yr_data.mean() if len(yr_data) else 0
-    portfolio_row["Avg (All Years)"] = recent["total_cost"].mean()
     portfolio_row["2024 → 2025"] = (
         ((portfolio_row[2025] - portfolio_row[2024]) / portfolio_row[2024] * 100)
         if portfolio_row[2024] > 0 and portfolio_row[2025] > 0 else np.nan
     )
+    recent_5yr = recent[recent["Year"].isin(TREND_YEARS)]
+    portfolio_row["Avg (5-Yr)"] = recent_5yr["total_cost"].mean() if len(recent_5yr) else 0
     avg_matrix.loc["PORTFOLIO AVG"] = portfolio_row
 
     tab_avg, tab_vol = st.tabs(["Average Cost per Turn", "Turn Volume"])
 
     with tab_avg:
         display = avg_matrix.copy()
-        for y in SUMMARY_YEARS + ["Avg (All Years)"]:
+        for y in SUMMARY_YEARS:
             display[y] = display[y].apply(lambda x: fmt(x) if x > 0 else "—")
         display["2024 → 2025"] = display["2024 → 2025"].apply(
             lambda x: pct(x) if pd.notna(x) else "—"
         )
-        st.dataframe(display, use_container_width=True, height=560)
+        display["Avg (5-Yr)"] = display["Avg (5-Yr)"].apply(lambda x: fmt(x) if x > 0 else "—")
+        # Reorder so Avg (5-Yr) is last
+        col_order = [c for c in display.columns if c not in ["2024 → 2025", "Avg (5-Yr)"]] + ["2024 → 2025", "Avg (5-Yr)"]
+        display = display[col_order]
+        st.dataframe(
+            display.style.set_properties(
+                subset=["Avg (5-Yr)"],
+                **{"background-color": "#eff6ff", "font-weight": "700", "color": "#1e40af"},
+            ),
+            use_container_width=True,
+            height=560,
+        )
 
         # Narrative
         prop_only = avg_matrix.drop("PORTFOLIO AVG")
-        port_avg = avg_matrix.loc["PORTFOLIO AVG", "Avg (All Years)"]
+        port_avg = avg_matrix.loc["PORTFOLIO AVG", "Avg (5-Yr)"]
         yoy_chg = avg_matrix.loc["PORTFOLIO AVG", "2024 → 2025"]
 
         if len(prop_only) >= 2:
-            top_prop = prop_only.sort_values("Avg (All Years)", ascending=False).index[0]
-            top_avg = prop_only.loc[top_prop, "Avg (All Years)"]
-            low_candidates = prop_only[prop_only["Avg (All Years)"] > 0].sort_values("Avg (All Years)", ascending=True)
+            top_prop = prop_only.sort_values("Avg (5-Yr)", ascending=False).index[0]
+            top_avg = prop_only.loc[top_prop, "Avg (5-Yr)"]
+            low_candidates = prop_only[prop_only["Avg (5-Yr)"] > 0].sort_values("Avg (5-Yr)", ascending=True)
             low_prop = low_candidates.index[0] if len(low_candidates) else top_prop
-            low_avg = prop_only.loc[low_prop, "Avg (All Years)"]
+            low_avg = prop_only.loc[low_prop, "Avg (5-Yr)"]
             spread = top_avg - low_avg
             # Count properties above/below avg
-            above_avg = len(prop_only[prop_only["Avg (All Years)"] > port_avg])
-            below_avg = len(prop_only[prop_only["Avg (All Years)"] <= port_avg])
+            above_avg = len(prop_only[prop_only["Avg (5-Yr)"] > port_avg])
+            below_avg = len(prop_only[prop_only["Avg (5-Yr)"] <= port_avg])
             # Properties with YoY increase
             yoy_col = "2024 → 2025"
             rising = prop_only[(prop_only[yoy_col].notna()) & (prop_only[yoy_col] > 0)]
@@ -914,6 +926,46 @@ elif view == "2 — Portfolio Overview":
             f"<strong>{lowest_prop}</strong> has the fewest turns (<strong>{lowest_count}</strong>) — "
             f"{'low volume means less data for benchmarking; combine with similar-sized properties for comparison.' if lowest_count < 10 else 'sufficient data for reliable benchmarking.'}"
         )
+
+    # ══════════════════════════════════════════════════
+    # AVERAGE COST BY PROPERTY & FLOOR PLAN (Trailing 5 Years)
+    # ══════════════════════════════════════════════════
+    section(f"Average Full Turn Cost by Property & Floor Plan — {TREND_YEARS[0]} through {TREND_YEARS[-1]}")
+    st.caption("Average cost per Full Turn by property and floor plan (trailing 5 years only)")
+
+    fp_recent = ft_turns[ft_turns["Year"].isin(TREND_YEARS)]
+    fp_matrix = (
+        fp_recent.groupby(["Property Name", "Floor Plan"])["total_cost"]
+        .mean().unstack(fill_value=0)
+    )
+    # Sort columns by floor plan name (natural alpha)
+    fp_matrix = fp_matrix.reindex(columns=sorted(fp_matrix.columns))
+    # Property avg (exclude zeros)
+    fp_matrix["Property Avg"] = fp_matrix[sorted(fp_matrix.columns.drop("Property Avg", errors="ignore"))].replace(0, np.nan).mean(axis=1)
+    # Sort rows by PROPERTY_ORDER
+    fp_matrix = fp_matrix.loc[sorted(fp_matrix.index, key=lambda n: _PROP_RANK.get(n, 999))]
+    # Portfolio avg row
+    fp_cols = [c for c in fp_matrix.columns if c != "Property Avg"]
+    port_fp_row = {}
+    for fp in fp_cols:
+        fp_vals = fp_matrix[fp].replace(0, np.nan).dropna()
+        port_fp_row[fp] = fp_vals.mean() if len(fp_vals) else 0
+    port_fp_row["Property Avg"] = fp_recent["total_cost"].mean()
+    fp_matrix.loc["PORTFOLIO AVG"] = port_fp_row
+
+    # Format for display
+    fp_display = fp_matrix.copy()
+    for col in fp_display.columns:
+        fp_display[col] = fp_display[col].apply(lambda x: fmt(x) if x > 0 else "—")
+
+    st.dataframe(
+        fp_display.style.set_properties(
+            subset=["Property Avg"],
+            **{"background-color": "#eff6ff", "font-weight": "700", "color": "#1e40af"},
+        ),
+        use_container_width=True,
+        height=560,
+    )
 
     footer()
 
