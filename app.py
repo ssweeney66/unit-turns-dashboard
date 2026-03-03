@@ -135,9 +135,14 @@ st.markdown("""
     }
     .insight-box strong { color: #1e40af; }
 
-    .outlier-flag {
+    .risk-flag {
+        border-radius: 8px; padding: 12px 16px; margin: 6px 0; font-size: 13px;
+    }
+    .risk-flag-high {
         background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #dc2626;
-        border-radius: 8px; padding: 12px 16px; margin: 6px 0; font-size: 13px; color: #7f1d1d;
+    }
+    .risk-flag-medium {
+        background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f59e0b;
     }
 
     /* Tabs */
@@ -265,10 +270,12 @@ def expense_year_label(yr):
 EXPENSE_YEAR_LABELS = [expense_year_label(y) for y in EXPENSE_YEARS]
 
 def footer():
+    _data_date = ft_turns["Move-Out Date"].max()
+    _date_label = _data_date.strftime("%b %Y") if pd.notna(_data_date) else "N/A"
     st.markdown(
         '<div class="dashboard-footer">'
         'CONFIDENTIAL — Full Turn Analytics Dashboard &nbsp;|&nbsp; '
-        f'Data as of Feb 2026 &nbsp;|&nbsp; '
+        f'Data through {_date_label} &nbsp;|&nbsp; '
         'Prepared for Executive Review'
         '</div>',
         unsafe_allow_html=True,
@@ -612,7 +619,7 @@ view = st.sidebar.radio("View", [
     "3 — Property Summary",
     "4 — Category Trends",
     "5 — Unit Search",
-    "6 — Data Review LLM",
+    "6 — AI Data Review",
 ])
 
 st.sidebar.markdown("---")
@@ -833,7 +840,7 @@ if view == "3 — Property Summary":
         last5["Completion"] = last5["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
         last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
         last5["Cost"] = last5["total_cost"].apply(fmt)
-        last5["Dur"] = last5["Duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
+        last5["Dur"] = last5["Duration"].apply(lambda x: f"{x:.0f} days" if pd.notna(x) else "—")
 
         l5_disp = last5[["#", "Unit Label", "Floor Plan", "Move-Out", "Completion",
                          "Cost", "Dur", "line_items"]].copy()
@@ -1355,10 +1362,15 @@ elif view == "5 — Unit Search":
             f"ID: `{sample['UID']}`"
         )
 
-        c1, c2, c3 = st.columns(3)
+        most_recent = unit_ts.iloc[0]
+        most_recent_date = most_recent["Move-Out Date"]
+        most_recent_type = most_recent["Turn Type"]
+
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Turns", len(unit_ts))
         c2.metric("Lifetime Spend", fmt(unit_ts["total_cost"].sum()))
         c3.metric("Avg Cost / Turn", fmt(unit_ts["total_cost"].mean()))
+        c4.metric("Most Recent", f"{most_recent_type} ({most_recent_date.strftime('%b %Y') if pd.notna(most_recent_date) else '—'})")
 
         section("Turn History")
         for _, turn in unit_ts.iterrows():
@@ -1387,15 +1399,6 @@ elif view == "5 — Unit Search":
             total_last_ft = last_ft_items["Invoice Amount"].sum()
 
         section("Pre-Scoping — Unit Work History")
-
-        most_recent = unit_ts.iloc[0]
-        most_recent_date = most_recent["Move-Out Date"]
-        most_recent_type = most_recent["Turn Type"]
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Lifetime Unit Spend", fmt(unit_ts["total_cost"].sum()))
-        c2.metric("Total Turns", str(len(unit_ts)))
-        c3.metric("Most Recent", f"{most_recent_type} ({most_recent_date.strftime('%b %Y') if pd.notna(most_recent_date) else '—'})")
 
         # Multi-year category table — all turn types
         history_html, hist_years, hist_totals = render_scope_history_table(unit_df, unit_ts)
@@ -1679,8 +1682,8 @@ elif view == "1 — Executive Summary":
     c2.metric("2025 Avg Cost", fmt(curr_avg), (pct(yoy_delta) + " vs '24") if pd.notna(yoy_delta) else "—")
     c3.metric("Portfolio Avg (All)", fmt(portfolio_avg))
     c4.metric("2025 Total Spend", fmt(curr_year["total_cost"].sum()))
-    c5.metric("Median Duration", f"{dur_now:.0f}d" if pd.notna(dur_now) else "—",
-              f"{dur_now - dur_then:+.0f}d vs '24" if (pd.notna(dur_now) and pd.notna(dur_then)) else "")
+    c5.metric("Median Duration", f"{dur_now:.0f} days" if pd.notna(dur_now) else "—",
+              f"{dur_now - dur_then:+.0f} days vs '24" if (pd.notna(dur_now) and pd.notna(dur_then)) else "")
     c6.metric("Active Properties", f"{curr_year['Property ID'].nunique()}" if len(curr_year) else "0")
 
     # ━━ Section 1: Cost Trajectory ━━
@@ -1790,7 +1793,7 @@ elif view == "1 — Executive Summary":
         pb_display = prop_bench[["Rank", "Property Name", "turns", "avg_cost", "vs Portfolio", "avg_duration"]].copy()
         pb_display["avg_cost"] = pb_display["avg_cost"].apply(fmt)
         pb_display["vs Portfolio"] = pb_display["vs Portfolio"].apply(lambda x: pct(x))
-        pb_display["avg_duration"] = pb_display["avg_duration"].apply(lambda x: f"{x:.0f}d" if pd.notna(x) else "—")
+        pb_display["avg_duration"] = pb_display["avg_duration"].apply(lambda x: f"{x:.0f} days" if pd.notna(x) else "—")
         pb_display.columns = ["#", "Property", "Turns", "Avg Cost", "vs Portfolio", "Med Duration"]
         st.dataframe(pb_display, use_container_width=True, hide_index=True, height=480)
 
@@ -1998,12 +2001,10 @@ elif view == "1 — Executive Summary":
         risk_df = risk_df.sort_values("_sort").drop("_sort", axis=1)
 
         for _, r in risk_df.iterrows():
-            color = "#dc2626" if r["Severity"] == "High" else "#f59e0b"
+            sev_class = "risk-flag-high" if r["Severity"] == "High" else "risk-flag-medium"
             icon = "🔴" if r["Severity"] == "High" else "🟡"
             st.markdown(
-                f'<div style="background: {"#fef2f2" if r["Severity"] == "High" else "#fffbeb"}; '
-                f'border: 1px solid {"#fecaca" if r["Severity"] == "High" else "#fde68a"}; '
-                f'border-left: 4px solid {color}; border-radius: 8px; padding: 12px 16px; margin: 6px 0; font-size: 13px;">'
+                f'<div class="risk-flag {sev_class}">'
                 f'<strong>{icon} {r["Risk"]}</strong> — {r["Detail"]}</div>',
                 unsafe_allow_html=True,
             )
@@ -2032,8 +2033,8 @@ elif view == "1 — Executive Summary":
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VIEW 6: DATA REVIEW LLM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "6 — Data Review LLM":
-    banner("Data Review", "AI-powered Q&A — ask questions about your Full Turn portfolio data")
+elif view == "6 — AI Data Review":
+    banner("AI Data Review", "Ask questions about your portfolio data — powered by AI")
 
     # ── Build data context for the LLM ──
     @st.cache_data
@@ -2255,7 +2256,7 @@ Guidelines:
         prov_cfg["label"],
         type="password",
         placeholder=prov_cfg["placeholder"],
-        help=f"Enter your {prov_cfg['label']} to enable the Data Review LLM. Your key is never stored.",
+        help=f"Enter your {prov_cfg['label']} to enable AI Data Review. Your key is never stored.",
     )
 
     def call_llm(provider, model, api_key, system_prompt, messages):
@@ -2268,7 +2269,7 @@ Guidelines:
                 model=model,
                 system=system_prompt,
                 messages=api_msgs,
-                max_tokens=1024,
+                max_tokens=1000,
                 temperature=0.3,
             )
             return response.content[0].text
@@ -2312,13 +2313,14 @@ Guidelines:
                 "Your key is used only for this session and is never stored.")
         st.markdown("**Example questions you can ask:**")
         st.markdown("""
-        - *Which property has the highest average Full Turn cost?*
-        - *How has our total spend changed year over year?*
-        - *What are the top 3 budget categories by spend?*
+        - *Which property has the highest average Full Turn cost, and how has it trended?*
         - *Compare 2024 vs 2025 performance across the portfolio*
-        - *Which properties are getting more expensive over time?*
-        - *What's our average renovation duration?*
-        - *Who are our top vendors and how much do we spend with each?*
+        - *What's our Materials vs Labor cost split?*
+        - *Is paint getting more expensive year over year?*
+        - *Which properties have the slowest turn durations?*
+        - *What are the top cost drivers at Roscoe?*
+        - *Which units are repeat turners — most Full Turns?*
+        - *How many Make Readies vs Full Turns are we doing?*
         """)
         footer()
     else:
