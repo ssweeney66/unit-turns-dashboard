@@ -46,16 +46,6 @@ YEARS = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 TREND_YEARS = [2021, 2022, 2023, 2024, 2025]
 CHART_TEMPLATE = "plotly_white"
 
-# ── Materials vs Labor category classification ──
-MATERIALS_CATS = [
-    "Supplies", "Appliances", "Flooring Materials",
-    "Cabinets Materials", "Countertops Materials", "Windows",
-]
-LABOR_CATS = [
-    "Labor General", "Flooring Labor", "Electric General",
-    "Countertops Labor", "Plumbing", "Powerwash and Demo",
-    "Management Fee", "Scrape Ceiling", "Glaze", "Cabinets Labor", "Paint",
-]
 
 # ── Expense analysis constants ──
 EXPENSE_YEARS = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
@@ -942,14 +932,12 @@ if view == "3 — Property Summary":
         fp_turns = p_turns[p_turns["Floor Plan"] == selected_fp].copy()
         fp_lines = p_lines[p_lines["Floor Plan"] == selected_fp].copy()
 
-    fp_label = selected_fp if selected_fp != "All Floor Plans" else "All Floor Plans"
-
-    section(f"Last 5 Completed Full Turns — {fp_label}")
+    section(f"Last 5 Completed Full Turns — {selected_fp}")
 
     last5 = fp_turns.sort_values("completion_date", ascending=False).head(5).copy()
 
     if len(last5) == 0:
-        st.info(f"No completed Full Turns found for {fp_label}.")
+        st.info(f"No completed Full Turns found for {selected_fp}.")
     else:
         last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
 
@@ -1020,10 +1008,8 @@ if view == "3 — Property Summary":
 elif view == "2 — Portfolio Overview":
     banner("Portfolio Overview", "Cross-property cost comparison and turn volume — 2016 through 2025")
 
-    SUMMARY_YEARS = YEARS
-
     # KPIs
-    recent = ft_turns[ft_turns["Year"].isin(SUMMARY_YEARS)]
+    recent = ft_turns[ft_turns["Year"].isin(YEARS)]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Full Turns (2016–25)", f"{len(recent):,}")
     c2.metric("Total Spend", fmt(recent["total_cost"].sum()))
@@ -1036,14 +1022,14 @@ elif view == "2 — Portfolio Overview":
     avg_matrix = (
         recent.groupby(["Property Name", "Year"])["total_cost"]
         .mean().unstack(fill_value=0)
-        .reindex(columns=SUMMARY_YEARS, fill_value=0)
+        .reindex(columns=YEARS, fill_value=0)
     )
 
     # Count matrix
     count_matrix = (
         recent.groupby(["Property Name", "Year"]).size()
         .unstack(fill_value=0)
-        .reindex(columns=SUMMARY_YEARS, fill_value=0)
+        .reindex(columns=YEARS, fill_value=0)
     )
 
     # YoY change
@@ -1059,7 +1045,7 @@ elif view == "2 — Portfolio Overview":
 
     # Portfolio total row
     portfolio_row = {}
-    for y in SUMMARY_YEARS:
+    for y in YEARS:
         yr_data = recent[recent["Year"] == y]["total_cost"]
         portfolio_row[y] = yr_data.mean() if len(yr_data) else 0
     portfolio_row["2024 → 2025"] = (
@@ -1074,7 +1060,7 @@ elif view == "2 — Portfolio Overview":
 
     with tab_avg:
         display = avg_matrix.copy()
-        for y in SUMMARY_YEARS:
+        for y in YEARS:
             display[y] = display[y].apply(lambda x: fmt(x) if x > 0 else "—")
         display["2024 → 2025"] = display["2024 → 2025"].apply(
             lambda x: pct(x) if pd.notna(x) else "—"
@@ -1332,7 +1318,6 @@ elif view == "4 — Unit Search":
                 index="Budget Category", columns="Year",
                 values="Invoice Amount", aggfunc="sum", fill_value=0,
             ).reindex(columns=hist_years, fill_value=0)
-            ALL_CATS_EXP = CORE_LABOR + CORE_MATERIALS + OTHER_CATS
             group_labels = {}
             for c in CORE_LABOR:
                 group_labels[c] = "Core Labor"
@@ -1341,7 +1326,7 @@ elif view == "4 — Unit Search":
             for c in OTHER_CATS:
                 group_labels[c] = "Other"
             rows = []
-            for c in ALL_CATS_EXP:
+            for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS:
                 row = {"Category": c, "Group": group_labels.get(c, "")}
                 for y in hist_years:
                     row[str(int(y))] = work_pivot_exp.loc[c, y] if c in work_pivot_exp.index else 0
@@ -1837,7 +1822,7 @@ elif view == "1 — Executive Summary":
             f"indicating {'a few high-cost turns are pulling the average up — review those outliers for scope creep' if avg_vs_med > 1000 else 'consistent turn costs across the portfolio'}."
         ) if len(curr_year) >= 3 else ""
         insight(
-            f"Costs are <strong>{trend_word}</strong> over the last 3 years (<strong>{pct(recent_trend)}</strong> from 2023 to 2025). "
+            f"Costs are <strong>{trend_word}</strong> over the last 3 years (<strong>{abs(recent_trend):.1f}%</strong> from 2023 to 2025). "
             f"{'Focus on controlling scope at properties with rising costs — see benchmarking below.' if recent_trend > 5 else 'Cost discipline is holding — maintain current vendor agreements and scope standards.' if recent_trend <= 5 and recent_trend >= -5 else 'Cost reductions are working — document what changed and apply across the portfolio.'}"
             f"{skew_note}"
         )
@@ -2058,7 +2043,7 @@ elif view == "1 — Executive Summary":
             })
 
     # 3. Category inflation (per-turn spend, all 17 raw categories)
-    for cat_name in MATERIALS_CATS + LABOR_CATS:
+    for cat_name in CORE_LABOR + CORE_MATERIALS + OTHER_CATS:
         cat24_turns = ft_lines[(ft_lines["Year"] == 2024) & (ft_lines["Budget Category"] == cat_name)].groupby("Turn Key")["Invoice Amount"].sum()
         cat25_turns = ft_lines[(ft_lines["Year"] == 2025) & (ft_lines["Budget Category"] == cat_name)].groupby("Turn Key")["Invoice Amount"].sum()
         if len(cat24_turns) >= 5 and len(cat25_turns) >= 5:
@@ -2071,7 +2056,7 @@ elif view == "1 — Executive Summary":
                     "Severity": "High" if chg > 50 else "Medium",
                 })
 
-    # 4. High-frequency units (>4 Full Turns all-time)
+    # 4. High-frequency units (5+ Full Turns all-time)
     freq_units = ft_turns.groupby(["Property Name", "Unit Label"])["Turn Key"].nunique().reset_index(name="turns")
     chronic = freq_units[freq_units["turns"] >= 5]
     if len(chronic) > 0:
@@ -2140,6 +2125,7 @@ elif view == "5 — Rent Roll":
         "Dickens": "Rent Roll - Dickens.xlsx",
         "Fruitland": "Rent Roll - Fruitland.xlsx",
         "Garfield": "Rent Roll - Garfield.xlsx",
+        "Topanga": "Rent Roll - Topanga.xlsx",
         "12756 Moorpark": "Rent Roll - 12756Moorpark.xlsx",
         "12800 Moorpark": "Rent Roll - 12800Moorpark.xlsx",
     }
@@ -2507,6 +2493,7 @@ elif view == "6 — Data Health":
         "Rent Roll — Dickens": "Rent Roll - Dickens.xlsx",
         "Rent Roll — Fruitland": "Rent Roll - Fruitland.xlsx",
         "Rent Roll — Garfield": "Rent Roll - Garfield.xlsx",
+        "Rent Roll — Topanga": "Rent Roll - Topanga.xlsx",
         "Rent Roll — 12756 Moorpark": "Rent Roll - 12756Moorpark.xlsx",
         "Rent Roll — 12800 Moorpark": "Rent Roll - 12800Moorpark.xlsx",
     }
@@ -2702,9 +2689,9 @@ Key definitions:
 - Duration: Days from move-out to last invoice (renovation timeline)
 - Cost Types: Materials, Labor, Mixed, Fee — every invoice line is classified into one of these
 - Budget Categories (17 total, grouped):
-  Core Labor (7): Paint, Labor General, Flooring Labor, Electric General, Countertops Labor, Plumbing, Cabinets Labor
-  Core Materials (4): Appliances, Flooring Materials, Cabinets Materials, Countertops Materials
-  Other (6): Supplies, Powerwash and Demo, Management Fee, Scrape Ceiling, Glaze, Windows
+  Core Labor (7): Flooring Labor, Countertops Labor, Cabinets Labor, Paint, Glaze, Labor General, Management Fee
+  Core Materials (4): Flooring Materials, Countertops Materials, Cabinets Materials, Appliances
+  Other (6): Electric General, Plumbing, Scrape Ceiling, Supplies, Windows, Powerwash and Demo
 
 Available data below includes:
 - Portfolio overview and yearly trends

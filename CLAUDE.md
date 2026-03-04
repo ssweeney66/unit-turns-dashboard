@@ -11,7 +11,7 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `app.py` — single-file dashboard (~2,790 lines)
+- **File:** `app.py` — single-file dashboard (~2,870 lines)
 - **Data:** `Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Live URL:** `https://unit-turns-dashboard-t2yhaxw6dfvmrqixmdxprz.streamlit.app/`
@@ -24,7 +24,7 @@
 2. **Portfolio Overview** — Property x Year cost/volume matrices, Property x Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
 3. **Property Summary** — Single-property deep dive: volume, floor plans, expense group trend, category expenses, last 5 turns with floor plan comparison
 4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **Rent Roll** — Property-level rent roll with year-based turn history columns (2026–2021), portfolio Renovated vs Classic summary table with % columns, unit-level detail with KPIs
+5. **Rent Roll** — Portfolio Renovated vs Classic summary (% columns), property-level rent roll with year columns (2026–2021), KPIs, high-frequency turn outliers (5+ turns since 2019)
 6. **Data Health** — File timestamp monitoring with 90-day freshness threshold (green/red/missing signals)
 7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 
@@ -35,9 +35,9 @@
 - **Key columns:** Property Name, Building Code, Unit Number, Floor Plan, Move-Out Date, Turn Type, Vendor Name, Invoice Amount, Budget Category, Cost Type
 
 ### Rent Rolls (folder: `Rent Rolls/`)
-- **Active files (15):** Woodman, MontereyPark, Collins, 51Village, Lindley, ElRancho, Alta Vista, Roscoe, Woodbridge, Darby, Dickens, Fruitland, Garfield, 12756Moorpark, 12800Moorpark
+- **Active files (16):** Woodman, MontereyPark, Collins, 51Village, Lindley, ElRancho, Alta Vista, Roscoe, Woodbridge, Darby, Dickens, Fruitland, Garfield, Topanga, 12756Moorpark, 12800Moorpark
 - **No turn data (2):** 12756 Moorpark (10 units), 12800 Moorpark (18 units) — all Classic, no matching property in turn data
-- **Missing:** Topanga — no rent roll file exists
+- **All properties covered** — Topanga rent roll now active (40 units, direct match, "301 HUD" suffix stripped)
 - **Format:** 8 metadata header rows (skip), header at row 8, 2 footer/summary rows to filter out
 - **Columns (5):** Unit, BD/BA, Market Rent, Rent, Move-in
 - **Cleanup:** `header=8`, drop all-NaN rows, filter out rows where Unit contains "Units" or "Total", filter out rows with "LLC", "Properties", or ", LP"
@@ -59,6 +59,7 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - **Dickens:** "12-A" -> "12A" (hyphen removed by `_norm_unit`); "07 MGR" -> "7" (suffix stripped + leading zero)
 - **Fruitland:** "01" -> "1" (leading zero stripped); "09 MGR" -> "9" (suffix + leading zero)
 - **Garfield:** "616" -> "616", "616A" -> "616A", "618 1/2" -> "618 1/2" (kept as-is)
+- **Topanga:** "101" -> "101" (3-digit, direct match); "301 HUD" -> "301" (suffix stripped)
 - **12756 Moorpark:** "101" -> "101" (3-digit, no turn data — all Classic)
 - **12800 Moorpark:** "1" -> "1", "12A" -> "12A" (no turn data — all Classic)
 
