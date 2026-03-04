@@ -11,7 +11,7 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `app.py` — single-file dashboard (~2,870 lines)
+- **File:** `app.py` — single-file dashboard (~2,895 lines)
 - **Data:** `Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Live URL:** `https://unit-turns-dashboard-t2yhaxw6dfvmrqixmdxprz.streamlit.app/`
@@ -22,9 +22,9 @@
 
 1. **Executive Summary** — Board-level KPIs, cost trajectory, property benchmarks, vendor risk, capital forecast, risk flags
 2. **Portfolio Overview** — Property x Year cost/volume matrices, Property x Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
-3. **Property Summary** — Single-property deep dive: volume, floor plans, expense group trend, category expenses, last 5 turns with floor plan comparison
+3. **Property Summary** — Single-property deep dive: volume, floor plans, category expenses (Core Labor/Materials/Other avg per turn), last 5 turns with floor plan comparison
 4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **Rent Roll** — Portfolio Renovated vs Classic summary (% columns), property-level rent roll with year columns (2026–2021), KPIs, high-frequency turn outliers (5+ turns since 2019)
+5. **Rent Roll** — Portfolio Renovated vs Classic summary (% columns), floor plan summary (avg reno/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Status (green/red), FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
 6. **Data Health** — File timestamp monitoring with 90-day freshness threshold (green/red/missing signals)
 7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 
@@ -85,8 +85,10 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - `_norm_unit(u)` — normalizes a unit ID: strips suffixes (HUD/MGR/BC/ASST. MGR), removes formatting hyphens ("12-A" → "12A"), normalizes leading zeros
 - `_normalize_mp_bldg(addr)` — normalizes Monterey Park building addresses to match turn data
 - `rr_to_turn_key(prop_name, rr_unit_str)` — maps a rent roll unit to the compound key used in turn data
-- `build_turn_history(prop_name, _df_all)` — returns dict of compound_key -> dict of year -> turn string ("FT - $26,000")
+- `_bdba_to_fp(bdba)` — converts rent roll BD/BA (e.g. "2/1.00") to turn data Floor Plan format (e.g. "2x1")
 - `get_ft_units(prop_name, _df_all)` — returns set of compound keys for units with at least one Full Turn
+- `get_avg_ft_cost(prop_name, _df_all)` — returns average Full Turn cost for a property (all-time)
+- `get_ft_cost_by_fp(prop_name, _df_all)` — returns dict of Floor Plan → trailing 3-year avg FT cost
 
 ## Coding Standards
 

@@ -340,9 +340,7 @@ def render_scope_history_table(unit_df, unit_ts):
             cells = ""
             for y in year_cols:
                 val = pivot.loc[c, y] if c in pivot.index and y in pivot.columns else 0
-                if val > 0:
-                    cells += f'<td class="year-val">{fmt(val)}</td>'
-                elif val < 0:
+                if val != 0:
                     cells += f'<td class="year-val">{fmt(val)}</td>'
                 else:
                     cells += f'<td class="year-val" style="color:#cbd5e1;">—</td>'
