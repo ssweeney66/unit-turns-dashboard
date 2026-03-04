@@ -2136,8 +2136,6 @@ elif view == "5 — Rent Roll":
         rr["Rent"] = pd.to_numeric(rr["Rent"], errors="coerce")
         rr["Lease From"] = pd.to_datetime(rr["Lease From"], errors="coerce")
         rr["Lease To"] = pd.to_datetime(rr["Lease To"], errors="coerce")
-        if "Move-out" in rr.columns:
-            rr["Move-out"] = pd.to_datetime(rr["Move-out"], errors="coerce")
         return rr
 
     # ── Build turn history columns for a property ──
@@ -2207,10 +2205,6 @@ elif view == "5 — Rent Roll":
                 "Lease From": row["Lease From"].strftime("%b %Y") if pd.notna(row["Lease From"]) else "",
                 "Lease To": row["Lease To"].strftime("%b %Y") if pd.notna(row["Lease To"]) else "",
             }
-            # Add move-out only if the column exists and any unit has one
-            if "Move-out" in rr.columns and rr["Move-out"].notna().any():
-                r["Move-out"] = row["Move-out"].strftime("%b %d, %Y") if pd.notna(row["Move-out"]) else ""
-
             # Turn history columns
             entries = turn_hist.get(unit_key, [])
             for i in range(max_turns):

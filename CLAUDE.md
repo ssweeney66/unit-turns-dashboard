@@ -37,7 +37,7 @@
 ### Rent Rolls (folder: `Rent Rolls/`)
 - **Files:** `Rent Roll - Woodman.xlsx`, `Rent Roll - Monterey Park.xlsx`, `Rent Roll - Collins.xlsx`
 - **Format:** 8 metadata header rows (skip), header at row 8, 2 footer/summary rows to filter out
-- **Columns (8):** Unit, BD/BA, Status, Market Rent, Rent, Lease From, Lease To, Move-out
+- **Columns (7):** Unit, BD/BA, Status, Market Rent, Rent, Lease From, Lease To
 - **Cleanup:** `header=8`, drop all-NaN rows, filter out rows where Unit contains "Units" or "Total", filter out property address rows
 - **Collins quirk:** Has an extra property address row after the header that must be filtered (contains "COLLINS, LLC")
 
