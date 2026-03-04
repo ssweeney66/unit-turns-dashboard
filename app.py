@@ -2396,6 +2396,68 @@ elif view == "5 — Rent Roll":
             use_container_width=True, hide_index=True, height=700,
         )
 
+        # ── Totals ──
+        tc1, tc2 = st.columns(2)
+        tc1.markdown(f"**Total Market Rent:** {fmt(total_market)}")
+        tc2.markdown(f"**Total Rent:** {fmt(total_rent)}")
+
+    st.markdown("---")
+
+    # ── High-Frequency Turn Outliers ──
+    section("High-Frequency Turn Outliers")
+    st.caption("Units with 5+ distinct turns since 2019 — flags frequent vacancy, tenant issues, or excessive rework")
+
+    _out_df = _df_all[pd.to_datetime(_df_all["Move-Out Date"], errors="coerce").dt.year >= 2019].copy()
+    _out_df["Move-Out Date"] = pd.to_datetime(_out_df["Move-Out Date"], errors="coerce")
+    _out_df["_bldg"] = _out_df["Building Code"].fillna("").astype(str).str.strip()
+
+    # Each distinct turn = unique (Property, BuildingCode, UnitNumber, MoveOutDate, TurnType)
+    _out_turns = _out_df.groupby(
+        ["Property Name", "_bldg", "Unit Number", "Move-Out Date", "Turn Type"]
+    ).agg(Cost=("Invoice Amount", "sum")).reset_index()
+
+    _out_unit = _out_turns.groupby(["Property Name", "_bldg", "Unit Number"]).agg(
+        Turns=("Turn Type", "count"),
+        Total_Spent=("Cost", "sum"),
+    ).reset_index()
+
+    _outliers = _out_unit[_out_unit["Turns"] >= 5].sort_values(
+        ["Turns", "Total_Spent"], ascending=[False, False]
+    )
+
+    if _outliers.empty:
+        st.info("No units found with 5+ turns since 2019.")
+    else:
+        outlier_rows = []
+        for _, orow in _outliers.iterrows():
+            mask = (
+                (_out_turns["Property Name"] == orow["Property Name"])
+                & (_out_turns["_bldg"] == orow["_bldg"])
+                & (_out_turns["Unit Number"] == orow["Unit Number"])
+            )
+            detail = _out_turns[mask].sort_values("Move-Out Date")
+            summaries = []
+            for _, t in detail.iterrows():
+                abbr = TURN_ABBR.get(t["Turn Type"], "??")
+                yr = t["Move-Out Date"].year
+                summaries.append(f"{abbr} {yr} – {fmt(t['Cost'])}")
+
+            outlier_rows.append({
+                "Property": orow["Property Name"],
+                "Unit": orow["Unit Number"],
+                "Turns": int(orow["Turns"]),
+                "Total Spent": fmt(orow["Total_Spent"]),
+                "Turn History (since 2019)": "  →  ".join(summaries),
+            })
+
+        insight(
+            f"<strong>{len(outlier_rows)} units</strong> across the portfolio have had "
+            f"<strong>5 or more turns since 2019</strong>. "
+            f"Frequent turnover drives up costs and signals potential tenant retention "
+            f"or unit condition issues that warrant investigation."
+        )
+        st.dataframe(pd.DataFrame(outlier_rows), use_container_width=True, hide_index=True)
+
     footer()
 
 
