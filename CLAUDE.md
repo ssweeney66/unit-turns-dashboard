@@ -24,8 +24,8 @@
 2. **Portfolio Overview** — Property × Year cost/volume matrices, Property × Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
 3. **Property Summary** — Single-property deep dive: volume, floor plans, expense group trend, category expenses, last 5 turns with floor plan comparison
 4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **Rent Roll** — (In Development) Property-level rent roll view from external Excel files
-6. **Vacancy** — (In Development) Unit vacancy analysis from external Excel file
+5. **Rent Roll** — Property-level rent roll with turn history columns, portfolio Classic vs Full Turn summary, unit mapping to turn data
+6. **Data Health** — File timestamp monitoring with 90-day freshness threshold
 7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 
 ## Data Sources
@@ -35,7 +35,7 @@
 - **Key columns:** Property Name, Building Code, Unit Number, Floor Plan, Move-Out Date, Turn Type, Vendor Name, Invoice Amount, Budget Category, Cost Type
 
 ### Rent Rolls (folder: `Rent Rolls/`)
-- **Files:** `Rent Roll - Woodman.xlsx`, `Rent Roll - MontereyPark.xlsx`, `Rent Roll - Collins.xlsx`
+- **Files:** `Rent Roll - Woodman.xlsx`, `Rent Roll - MontereyPark.xlsx`, `Rent Roll - Collins.xlsx`, `Rent Roll - 51Village.xlsx`
 - **Format:** 8 metadata header rows (skip), header at row 8, 2 footer/summary rows to filter out
 - **Columns (5):** Unit, BD/BA, Market Rent, Rent, Move-in
 - **Cleanup:** `header=8`, drop all-NaN rows, filter out rows where Unit contains "Units" or "Total", filter out property address rows
@@ -43,8 +43,9 @@
 
 ### Rent Roll ↔ Turn Data Unit Mapping
 - **Woodman:** Direct match — rent roll Unit ("101") = turn data Unit Number ("101"), no Building Code
-- **Monterey Park:** Rent roll "505 Pomona, Unit A" → turn data Building Code "505 Pomona" + Unit Number "A"
-- **Collins:** Rent roll prefix encodes building address — "39-xx" → Building Code "18339 Collins" + Unit Number "xx"; "47-xx" → Building Code "18347 Collins" + Unit Number "xx"
+- **51 at the Village:** Direct match — rent roll Unit ("101") = turn data Unit Number ("101"), no Building Code
+- **Monterey Park:** Rent roll "505 Pomona, Unit A" → turn data Building Code "505 Pomona" + Unit Number "A". Address normalization strips directional prefixes (W, S) and suffixes (Ave, Blvd, Dr). Spelling correction: rent roll "Hendricks" = turn data "Hendericks". Unit suffixes like "- ASST. MGR" or "- HUD" are stripped to single letter.
+- **Collins:** Rent roll prefix encodes building address — "39-xx" → Building Code "18339 Collins" + Unit Number "xx"; "47-xx" → Building Code "18347 Collins" + Unit Number "xx". Suffixes like "-MGR" are stripped.
 
 ### Vacancy (folder: `Vacancy/`)
 - **File:** `Unit Vacancy.xlsx` — (Not yet analyzed)

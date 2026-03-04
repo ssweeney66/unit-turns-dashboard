@@ -2130,6 +2130,7 @@ elif view == "5 — Rent Roll":
         "Monterey Park": "Rent Roll - MontereyPark.xlsx",
         "Woodman": "Rent Roll - Woodman.xlsx",
         "Collins": "Rent Roll - Collins.xlsx",
+        "51 at the Village": "Rent Roll - 51Village.xlsx",
     }
 
     # ── Load rent roll ──
@@ -2145,35 +2146,107 @@ elif view == "5 — Rent Roll":
         rr["Move-in"] = pd.to_datetime(rr["Move-in"], errors="coerce")
         return rr
 
+    # ── Unit mapping: rent roll → turn data ──
+    def _normalize_mp_bldg(addr):
+        """Normalize a Monterey Park building address to match turn data Building Code format.
+        E.g. '511 W Pomona Blvd' → '511 Pomona', '2425 Hendricks Ave' → '2425 Hendericks'."""
+        parts = addr.strip().split()
+        number = parts[0]
+        rest = parts[1:]
+        # Skip directional prefixes (W, S, N, E)
+        if rest and rest[0].upper() in ("W", "S", "N", "E"):
+            rest = rest[1:]
+        # Drop address suffixes
+        suffixes = {"Ave", "Blvd", "Dr", "St", "Ln", "Way", "Ct",
+                    "AVE", "BLVD", "DR", "ST", "LN", "WAY", "CT"}
+        street_parts = [p for p in rest if p not in suffixes]
+        street = " ".join(street_parts)
+        # Known spelling correction (rent roll vs turn data)
+        if street == "Hendricks":
+            street = "Hendericks"
+        return f"{number} {street}"
+
+    def rr_to_turn_key(prop_name, rr_unit_str):
+        """Map a rent roll unit ID to the compound key used in turn data.
+        Returns 'BuildingCode|UnitNumber' for properties with building codes,
+        or just 'UnitNumber' for direct-match properties."""
+        u = str(rr_unit_str).strip()
+
+        if prop_name == "Collins":
+            # "39-01" → "18339 Collins|01", "39-21-MGR" → "18339 Collins|21"
+            parts = u.split("-")
+            if len(parts) >= 2:
+                prefix, unit_num = parts[0], parts[1]
+                bldg = {"39": "18339 Collins", "47": "18347 Collins"}.get(prefix)
+                if bldg:
+                    return f"{bldg}|{unit_num}"
+            return u
+
+        elif prop_name == "Monterey Park":
+            # "505 Pomona, Unit A" → "505 Pomona|A"
+            # "511 W Pomona Blvd, Unit C" → "511 Pomona|C"
+            # "617 Pomona, Unit B - ASST. MGR" → "617 Pomona|B"
+            # "515 W Pomona Blvd" (no unit) → "515 Pomona"
+            if ", Unit " in u:
+                bldg_raw, unit_raw = u.rsplit(", Unit ", 1)
+                unit_letter = unit_raw.split()[0].rstrip(" -")
+            elif " Unit " in u:
+                idx = u.index(" Unit ")
+                bldg_raw = u[:idx]
+                unit_raw = u[idx + 6:]
+                unit_letter = unit_raw.split()[0].rstrip(" -")
+            else:
+                bldg_raw = u
+                unit_letter = None
+            norm_bldg = _normalize_mp_bldg(bldg_raw)
+            return f"{norm_bldg}|{unit_letter}" if unit_letter else norm_bldg
+
+        else:
+            # Woodman, 51 at the Village: direct match, no building code
+            return u
+
     # ── Build turn history columns for a property ──
     TURN_ABBR = {"Full Turn": "FT", "Make Ready": "MR", "Partial Turn": "PT"}
 
     @st.cache_data
     def build_turn_history(prop_name, _df_all):
-        """Return a dict: unit_key → list of 'FT 2025 - $26,000' strings (most recent first)."""
+        """Return a dict: compound_key → list of 'FT 2025 - $26,000' strings (most recent first).
+        Compound key is 'BuildingCode|UnitNumber' for properties with building codes,
+        or just 'UnitNumber' for direct-match properties (Woodman, 51Village)."""
         prop_lines = _df_all[_df_all["Property Name"] == prop_name].copy()
         prop_lines["Move-Out Date"] = pd.to_datetime(prop_lines["Move-Out Date"], errors="coerce")
-        turns = prop_lines.groupby(["Unit Number", "Move-Out Date", "Turn Type"]).agg(
+        # Build compound key from turn data
+        prop_lines["_bldg"] = prop_lines["Building Code"].fillna("").astype(str).str.strip()
+        prop_lines["_unit"] = prop_lines["Unit Number"].astype(str).str.strip()
+        prop_lines["_key"] = prop_lines.apply(
+            lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
+        )
+        turns = prop_lines.groupby(["_key", "Move-Out Date", "Turn Type"]).agg(
             Total_Cost=("Invoice Amount", "sum")
         ).reset_index()
         turns = turns.sort_values("Move-Out Date", ascending=False)
 
         history = {}
-        for unit, grp in turns.groupby("Unit Number"):
+        for key, grp in turns.groupby("_key"):
             entries = []
             for _, r in grp.iterrows():
                 abbr = TURN_ABBR.get(r["Turn Type"], "??")
                 yr = r["Move-Out Date"].year
                 cost = r["Total_Cost"]
                 entries.append(f"{abbr} {yr} - {fmt(cost)}")
-            history[str(unit).strip()] = entries
+            history[key] = entries
         return history
 
     @st.cache_data
     def get_ft_units(prop_name, _df_all):
-        """Return set of unit numbers that have had at least one Full Turn."""
-        ft = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Full Turn")]
-        return set(ft["Unit Number"].astype(str).str.strip())
+        """Return set of compound keys for units that have had at least one Full Turn."""
+        ft = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Full Turn")].copy()
+        ft["_bldg"] = ft["Building Code"].fillna("").astype(str).str.strip()
+        ft["_unit"] = ft["Unit Number"].astype(str).str.strip()
+        ft["_key"] = ft.apply(
+            lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
+        )
+        return set(ft["_key"])
 
     # ── Portfolio Summary — Classic vs Full Turn ──
     section("Portfolio Summary — Classic vs. Full Turn")
@@ -2188,9 +2261,11 @@ elif view == "5 — Rent Roll":
         if has_rr:
             rr_data = load_rent_roll(rr_path)
             rr_units = set(rr_data["Unit"].astype(str).str.strip())
-            ft_units = get_ft_units(prop, _df_all)
+            ft_keys = get_ft_units(prop, _df_all)
+            # Map rent roll unit IDs to turn data compound keys for matching
+            rr_mapped = {rr_to_turn_key(prop, u) for u in rr_units}
             n_units = len(rr_units)
-            n_ft = len(rr_units & ft_units)
+            n_ft = len(rr_mapped & ft_keys)
             n_classic = n_units - n_ft
             classic_pct = f"{n_classic / n_units * 100:.1f}%" if n_units else "-"
             summary_rows.append({
@@ -2224,7 +2299,7 @@ elif view == "5 — Rent Roll":
         rr_path = _RR_DIR / _RR_FILES[prop_choice]
         rr = load_rent_roll(rr_path)
         turn_hist = build_turn_history(prop_choice, _df_all)
-        ft_units = get_ft_units(prop_choice, _df_all)
+        ft_keys = get_ft_units(prop_choice, _df_all)
 
         # ── KPIs ──
         total_units = len(rr)
@@ -2233,7 +2308,8 @@ elif view == "5 — Rent Roll":
         ltl = total_market - total_rent
         ltl_pct = ltl / total_market if total_market else 0
         rr_unit_set = set(rr["Unit"].astype(str).str.strip())
-        n_ft = len(rr_unit_set & ft_units)
+        rr_mapped = {rr_to_turn_key(prop_choice, u) for u in rr_unit_set}
+        n_ft = len(rr_mapped & ft_keys)
         n_classic = total_units - n_ft
 
         k1, k2, k3, k4, k5 = st.columns(5)
@@ -2256,7 +2332,8 @@ elif view == "5 — Rent Roll":
                 "Rent": fmt(row["Rent"]) if pd.notna(row["Rent"]) else "",
                 "Move-in": row["Move-in"].strftime("%b %Y") if pd.notna(row["Move-in"]) else "",
             }
-            entries = turn_hist.get(unit_key, [])
+            mapped_key = rr_to_turn_key(prop_choice, unit_key)
+            entries = turn_hist.get(mapped_key, [])
             for i in range(max_turns):
                 r[f"Turn {i + 1}"] = entries[i] if i < len(entries) else ""
             display_rows.append(r)
@@ -2308,6 +2385,7 @@ elif view == "6 — Data Health":
         "Rent Roll — Woodman": "Rent Roll - Woodman.xlsx",
         "Rent Roll — Monterey Park": "Rent Roll - MontereyPark.xlsx",
         "Rent Roll — Collins": "Rent Roll - Collins.xlsx",
+        "Rent Roll — 51 at the Village": "Rent Roll - 51Village.xlsx",
     }
     for label, fname in rr_files.items():
         health_rows.append(file_health(_RR_DIR_H / fname, label))
