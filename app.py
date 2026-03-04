@@ -50,36 +50,6 @@ OTHER_CATS = [
     "Electric General", "Plumbing", "Scrape Ceiling",
     "Supplies", "Windows", "Powerwash and Demo",
 ]
-COST_TYPE_COLORS = {
-    "Materials": "#2563eb",
-    "Labor":     "#f59e0b",
-    "Mixed":     "#10b981",
-    "Fee":       "#6366f1",
-}
-COST_TYPES = ["Materials", "Labor", "Mixed", "Fee"]
-
-MAT_COLORS = {
-    "Supplies":              "#2563eb",
-    "Appliances":            "#ef4444",
-    "Flooring Materials":    "#f59e0b",
-    "Cabinets Materials":    "#8b5cf6",
-    "Countertops Materials": "#10b981",
-    "Windows":               "#06b6d4",
-}
-LAB_COLORS = {
-    "Labor General":    "#0ea5e9",
-    "Flooring Labor":   "#f97316",
-    "Electric General": "#eab308",
-    "Countertops Labor":"#14b8a6",
-    "Plumbing":         "#3b82f6",
-    "Powerwash and Demo":"#a855f7",
-    "Management Fee":   "#64748b",
-    "Scrape Ceiling":   "#ec4899",
-    "Glaze":            "#84cc16",
-    "Cabinets Labor":   "#f43f5e",
-    "Paint":            "#6366f1",
-}
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STYLING
@@ -557,8 +527,8 @@ def render_floor_plan_comparison_table(fp_lines, fp_turns_info):
 def render_category_table(title, categories, data, years=None, year_labels=None, yoy_pairs=None):
     """Render a pivot table for a set of budget categories with YoY change column(s).
 
-    The Total row is rendered separately as a pinned HTML bar so it stays
-    at the bottom regardless of column sorting in the dataframe.
+    The Total row is included in the DataFrame and styled with a subtle
+    background via Pandas Styler.
 
     Parameters
     ----------
@@ -594,8 +564,8 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
         st.info(f"No data for {title.split(' (')[0]} categories.")
         return
 
-    # Compute totals before formatting
-    totals = pivot.sum()
+    # Add Total row
+    pivot.loc["Total"] = pivot.sum()
 
     # Build YoY pairs list
     if yoy_pairs is None and len(years) >= 2:
@@ -603,7 +573,7 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
     elif yoy_pairs is None:
         yoy_pairs = []
 
-    # Compute YoY columns for category rows
+    # Compute YoY columns
     yoy_columns = {}
     for prior, current in yoy_pairs:
         if prior in pivot.columns and current in pivot.columns:
@@ -611,7 +581,7 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
             label = f"'{str(prior)[-2:]}→'{str(current)[-2:]}"
             yoy_columns[label] = yoy_vals
 
-    # Format category rows (no Total row)
+    # Format for display
     pivot_display = pivot.copy()
     pivot_display.columns = year_labels
     for col in pivot_display.columns:
@@ -620,26 +590,16 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
         pivot_display[label] = yoy_vals.apply(
             lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
         )
-    st.dataframe(pivot_display, use_container_width=True)
 
-    # Render pinned Total row as styled HTML bar
-    total_cells = "".join(f"<td>{fmt(totals.get(y, 0))}</td>" for y in years)
-    yoy_total_cells = ""
-    for prior, current in yoy_pairs:
-        if prior in totals.index and current in totals.index:
-            t_prior, t_current = totals.get(prior, 0), totals.get(current, 0)
-            yoy_val = ((t_current / t_prior) - 1) if t_prior > 0 else float("nan")
-            yoy_total_cells += f"<td>{yoy_val:+.0%}</td>" if pd.notna(yoy_val) and np.isfinite(yoy_val) else "<td>—</td>"
-    st.markdown(
-        f'<div style="background:#1e293b; border:1px solid #334155; border-radius:6px; '
-        f'padding:0; margin-top:-10px; margin-bottom:4px;">'
-        f'<table style="width:100%; border-collapse:collapse; color:#f1f5f9; font-size:0.85rem;">'
-        f'<tr style="font-weight:700;">'
-        f'<td style="padding:8px 12px; min-width:160px;">Total</td>'
-        f'{total_cells}{yoy_total_cells}'
-        f'</tr></table></div>',
-        unsafe_allow_html=True,
-    )
+    # Style Total row with subtle distinction
+    def style_total_row(styler):
+        styler.set_properties(
+            subset=pd.IndexSlice["Total", :],
+            **{"background-color": "#f1f5f9", "font-weight": "700", "border-top": "2px solid #cbd5e1"},
+        )
+        return styler
+
+    st.dataframe(style_total_row(pivot_display.style), use_container_width=True)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -868,22 +828,18 @@ if view == "3 — Property Summary":
 
     col1, col2 = st.columns([2, 3])
     with col1:
+        # Add Total row
+        grp_trend_pivot.loc["Total"] = grp_totals
         grp_trend_display = grp_trend_pivot.copy()
         grp_trend_display.columns = EXPENSE_YEAR_LABELS
         for col in grp_trend_display.columns:
             grp_trend_display[col] = grp_trend_display[col].apply(fmt)
-        st.dataframe(grp_trend_display, use_container_width=True)
-        # Pinned Total row
-        total_cells = "".join(f"<td>{fmt(grp_totals.get(y, 0))}</td>" for y in EXPENSE_YEARS)
-        st.markdown(
-            f'<div style="background:#1e293b; border:1px solid #334155; border-radius:6px; '
-            f'padding:0; margin-top:-10px; margin-bottom:4px;">'
-            f'<table style="width:100%; border-collapse:collapse; color:#f1f5f9; font-size:0.85rem;">'
-            f'<tr style="font-weight:700;">'
-            f'<td style="padding:8px 12px; min-width:160px;">Total</td>'
-            f'{total_cells}'
-            f'</tr></table></div>',
-            unsafe_allow_html=True,
+        st.dataframe(
+            grp_trend_display.style.set_properties(
+                subset=pd.IndexSlice["Total", :],
+                **{"background-color": "#f1f5f9", "font-weight": "700", "border-top": "2px solid #cbd5e1"},
+            ),
+            use_container_width=True,
         )
 
     with col2:

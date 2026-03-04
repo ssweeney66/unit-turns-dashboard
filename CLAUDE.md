@@ -11,7 +11,7 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `app.py` — single-file dashboard (~2,200 lines)
+- **File:** `app.py` — single-file dashboard (~2,500 lines)
 - **Data:** `Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Stack:** Streamlit 1.54.0, Pandas 2.3.3, Plotly 6.5.2, OpenAI, Anthropic, Google GenAI
@@ -20,8 +20,8 @@
 
 1. **Executive Summary** — Board-level KPIs, cost trajectory, property benchmarks, vendor risk, capital forecast, risk flags
 2. **Portfolio Overview** — Property × Year cost/volume matrices, Property × Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
-3. **Property Summary** — Single-property deep dive: volume, floor plans, cost types, category expenses, outliers
-4. **Unit Search** — Unit-level: turn history, work history table, projected scope with recency adjustment, comp detail, floor plan comparison, vendor recommendations, export (Excel/PDF)
+3. **Property Summary** — Single-property deep dive: volume, floor plans, expense group trend, category expenses, last 5 turns with floor plan comparison, outliers
+4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
 5. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 
 ## Data Model
