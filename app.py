@@ -360,23 +360,91 @@ def render_scope_history_table(unit_df, unit_ts):
     return html, year_cols, year_totals
 
 
-def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year, amount_label="Projected Cost"):
-    """Build an HTML checklist for projected scope with recently-done flagging.
+def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year,
+                                 amount_label="Projected Cost",
+                                 comp_lines=None, comp_info=None):
+    """Build an HTML checklist for projected scope with recently-done flagging
+    and optional comp turn columns.
 
     Three row states:
       row-done (green ✓): Category projected
       row-skip (gray —): Not projected
       row-recent (amber ↻): Projected by comps but recently done on this unit
+
+    comp_lines : DataFrame of line items for comp turns (optional)
+    comp_info  : DataFrame with Turn Key, Unit Label, Move-Out Date, Turn Type (optional)
     """
     GROUP_CSS = {"Core Labor": "group-hdr-labor", "Core Materials": "group-hdr-matl", "Other": "group-hdr-other"}
-    rows_html = []
+    ALL_CATS = CORE_LABOR + CORE_MATERIALS + OTHER_CATS
+
+    # Build comp column data if provided
+    has_comps = comp_lines is not None and comp_info is not None and len(comp_info) > 0
+    turn_keys = []
+    comp_pivot = pd.DataFrame()
+    comp_totals = {}
+    if has_comps:
+        comp_info = comp_info.sort_values("Move-Out Date", ascending=False).reset_index(drop=True)
+        turn_keys = comp_info["Turn Key"].tolist()
+        comp_pivot = comp_lines.pivot_table(
+            index="Budget Category", columns="Turn Key",
+            values="Invoice Amount", aggfunc="sum", fill_value=0,
+        )
+        comp_totals = {tk: comp_pivot[tk].sum() if tk in comp_pivot.columns else 0 for tk in turn_keys}
+
+    n_extra = len(turn_keys)
+    total_cols = 3 + n_extra  # status + category + projected + comp columns
+
+    # Build comp column headers
+    comp_hdrs = ""
+    for _, row in (comp_info.iterrows() if has_comps else pd.DataFrame().iterrows()):
+        tk = row["Turn Key"]
+        unit_lbl = row["Unit Label"]
+        date_str = row["Move-Out Date"].strftime("%b %y") if pd.notna(row["Move-Out Date"]) else "—"
+        turn_type_short = row.get("Turn Type", "")
+        if turn_type_short == "Make Ready":
+            tt_abbr = "MR"
+        elif turn_type_short == "Full Turn":
+            tt_abbr = "FT"
+        elif turn_type_short == "Partial Turn":
+            tt_abbr = "PT"
+        else:
+            tt_abbr = turn_type_short
+        comp_hdrs += (
+            f'<th class="year-col">{unit_lbl}'
+            f'<span class="year-subtext">{tt_abbr} · {date_str}</span></th>'
+        )
+
+    header = (
+        f'<tr><th style="width:32px;"></th><th>Category</th>'
+        f'<th>{amount_label}</th>{comp_hdrs}</tr>'
+    )
+
+    # Projected total
+    proj_total = sum(proj_amounts.get(c, 0) for c in ALL_CATS if c not in excluded_recent)
+
+    # Total row
+    total_cells = f'<td class="year-val">{fmt(proj_total)}</td>'
+    for tk in turn_keys:
+        total_cells += f'<td class="year-val">{fmt(comp_totals.get(tk, 0))}</td>'
+    total_row = f'<tr class="total-row"><td></td><td>Total</td>{total_cells}</tr>'
+
+    # Category rows
+    rows_html = [total_row]
     for group_label, group_cats in [("Core Labor", CORE_LABOR), ("Core Materials", CORE_MATERIALS), ("Other", OTHER_CATS)]:
         css = GROUP_CSS[group_label]
-        rows_html.append(f'<tr class="group-hdr {css}"><td colspan="3">{group_label}</td></tr>')
+        rows_html.append(f'<tr class="group-hdr {css}"><td colspan="{total_cols}">{group_label}</td></tr>')
         for c in group_cats:
             amt = proj_amounts.get(c, 0) if hasattr(proj_amounts, "get") else 0
+            # Build comp cells
+            comp_cells = ""
+            for tk in turn_keys:
+                val = comp_pivot.loc[c, tk] if c in comp_pivot.index and tk in comp_pivot.columns else 0
+                if val > 0:
+                    comp_cells += f'<td class="year-val">{fmt(val)}</td>'
+                else:
+                    comp_cells += f'<td class="year-val" style="color:#cbd5e1;">—</td>'
+
             if c in excluded_recent:
-                # Recently done — show comp amount struck through
                 comp_amt = excluded_recent[c]
                 yr = last_done_year.get(c, "")
                 rows_html.append(
@@ -384,6 +452,7 @@ def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year, 
                     f'<td class="status">&#8635;</td>'
                     f'<td>{c} <span style="font-size:11px;color:#94a3b8;">— done in {yr}</span></td>'
                     f'<td class="year-val">{fmt(comp_amt, 2)}</td>'
+                    f'{comp_cells}'
                     f'</tr>'
                 )
             elif amt > 0:
@@ -392,6 +461,7 @@ def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year, 
                     f'<td class="status">&#10003;</td>'
                     f'<td>{c}</td>'
                     f'<td>{fmt(amt, 2)}</td>'
+                    f'{comp_cells}'
                     f'</tr>'
                 )
             else:
@@ -400,11 +470,12 @@ def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year, 
                     f'<td class="status">—</td>'
                     f'<td>{c}</td>'
                     f'<td>—</td>'
+                    f'{comp_cells}'
                     f'</tr>'
                 )
     return (
         f'<table class="scope-checklist">'
-        f'<thead><tr><th style="width:32px;"></th><th>Category</th><th>{amount_label}</th></tr></thead>'
+        f'<thead>{header}</thead>'
         f'<tbody>{"".join(rows_html)}</tbody></table>'
     )
 
@@ -486,6 +557,9 @@ def render_floor_plan_comparison_table(fp_lines, fp_turns_info):
 def render_category_table(title, categories, data, years=None, year_labels=None, yoy_pairs=None):
     """Render a pivot table for a set of budget categories with YoY change column(s).
 
+    The Total row is rendered separately as a pinned HTML bar so it stays
+    at the bottom regardless of column sorting in the dataframe.
+
     Parameters
     ----------
     title : str – section title
@@ -519,8 +593,9 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
     if len(pivot) == 0:
         st.info(f"No data for {title.split(' (')[0]} categories.")
         return
-    # Add Total row
-    pivot.loc["Total"] = pivot.sum()
+
+    # Compute totals before formatting
+    totals = pivot.sum()
 
     # Build YoY pairs list
     if yoy_pairs is None and len(years) >= 2:
@@ -528,7 +603,7 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
     elif yoy_pairs is None:
         yoy_pairs = []
 
-    # Compute YoY columns
+    # Compute YoY columns for category rows
     yoy_columns = {}
     for prior, current in yoy_pairs:
         if prior in pivot.columns and current in pivot.columns:
@@ -536,7 +611,7 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
             label = f"'{str(prior)[-2:]}→'{str(current)[-2:]}"
             yoy_columns[label] = yoy_vals
 
-    # Format
+    # Format category rows (no Total row)
     pivot_display = pivot.copy()
     pivot_display.columns = year_labels
     for col in pivot_display.columns:
@@ -546,6 +621,25 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
             lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
         )
     st.dataframe(pivot_display, use_container_width=True)
+
+    # Render pinned Total row as styled HTML bar
+    total_cells = "".join(f"<td>{fmt(totals.get(y, 0))}</td>" for y in years)
+    yoy_total_cells = ""
+    for prior, current in yoy_pairs:
+        if prior in totals.index and current in totals.index:
+            t_prior, t_current = totals.get(prior, 0), totals.get(current, 0)
+            yoy_val = ((t_current / t_prior) - 1) if t_prior > 0 else float("nan")
+            yoy_total_cells += f"<td>{yoy_val:+.0%}</td>" if pd.notna(yoy_val) and np.isfinite(yoy_val) else "<td>—</td>"
+    st.markdown(
+        f'<div style="background:#1e293b; border:1px solid #334155; border-radius:6px; '
+        f'padding:0; margin-top:-10px; margin-bottom:4px;">'
+        f'<table style="width:100%; border-collapse:collapse; color:#f1f5f9; font-size:0.85rem;">'
+        f'<tr style="font-weight:700;">'
+        f'<td style="padding:8px 12px; min-width:160px;">Total</td>'
+        f'{total_cells}{yoy_total_cells}'
+        f'</tr></table></div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -728,37 +822,11 @@ if view == "3 — Property Summary":
         st.plotly_chart(fig_fp, use_container_width=True)
 
     # ══════════════════════════════════════════════════
-    # EXPENSE SUMMARY BY COST TYPE
+    # EXPENSE SUMMARY BY CATEGORY GROUP
     # ══════════════════════════════════════════════════
 
-    # ── Part 1: Combined summary (property-wide, all years) ──
-    section("Avg Full Turn Cost by Floor Plan — Cost Type Breakdown")
-    st.caption("Average cost per Full Turn by floor plan and cost type (property-wide, all years)")
-
-    fp_turn_counts = p_turns.groupby("Floor Plan")["Turn Key"].nunique().reset_index(name="n_turns")
-    fp_ct_spend = (
-        p_lines.groupby(["Floor Plan", "Cost Type"])["Invoice Amount"]
-        .sum().reset_index(name="total_spend")
-    )
-    fp_ct_spend = fp_ct_spend.merge(fp_turn_counts, on="Floor Plan", how="left")
-    fp_ct_spend["avg_per_turn"] = fp_ct_spend.apply(
-        lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
-    )
-
-    fp_ct_pivot = fp_ct_spend.pivot_table(
-        index="Floor Plan", columns="Cost Type",
-        values="avg_per_turn", fill_value=0
-    ).reindex(columns=COST_TYPES, fill_value=0)
-    fp_ct_pivot["Total"] = fp_ct_pivot.sum(axis=1)
-    fp_ct_pivot = fp_ct_pivot.sort_index()
-
-    fp_ct_display = fp_ct_pivot.copy()
-    for col in fp_ct_display.columns:
-        fp_ct_display[col] = fp_ct_display[col].apply(fmt)
-    st.dataframe(fp_ct_display, use_container_width=True)
-
-    # ── Part 2: Year-by-year Cost Type trend (property-wide) ──
-    section(f"Cost Type Trend by Year — {prop}")
+    section(f"Expense Group Trend by Year — {prop}")
+    st.caption("Average cost per Full Turn by category group — high-level summary of the detailed breakdown below")
 
     trend_lines = p_lines[p_lines["Year"].isin(EXPENSE_YEARS)].copy()
     trend_turn_counts = (
@@ -767,50 +835,75 @@ if view == "3 — Property Summary":
         .reindex(EXPENSE_YEARS, fill_value=0)
     )
 
-    ct_year_spend = (
-        trend_lines.groupby(["Cost Type", "Year"])["Invoice Amount"]
+    # Map each budget category to its group
+    cat_to_group = {}
+    for c in CORE_LABOR:
+        cat_to_group[c] = "Core Labor"
+    for c in CORE_MATERIALS:
+        cat_to_group[c] = "Core Materials"
+    for c in OTHER_CATS:
+        cat_to_group[c] = "Other"
+    trend_lines["Category Group"] = trend_lines["Budget Category"].map(cat_to_group).fillna("Other")
+
+    GROUP_ORDER = ["Core Labor", "Core Materials", "Other"]
+    GROUP_COLORS = {"Core Labor": "#2563eb", "Core Materials": "#10b981", "Other": "#7c3aed"}
+
+    grp_year_spend = (
+        trend_lines.groupby(["Category Group", "Year"])["Invoice Amount"]
         .sum().reset_index(name="total_spend")
     )
-    ct_year_spend["n_turns"] = ct_year_spend["Year"].map(trend_turn_counts).fillna(0)
-    ct_year_spend["avg_per_turn"] = ct_year_spend.apply(
+    grp_year_spend["n_turns"] = grp_year_spend["Year"].map(trend_turn_counts).fillna(0)
+    grp_year_spend["avg_per_turn"] = grp_year_spend.apply(
         lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
     )
 
-    ct_trend_pivot = ct_year_spend.pivot_table(
-        index="Cost Type", columns="Year",
+    grp_trend_pivot = grp_year_spend.pivot_table(
+        index="Category Group", columns="Year",
         values="avg_per_turn", fill_value=0
-    ).reindex(columns=EXPENSE_YEARS, fill_value=0).reindex(COST_TYPES)
-    ct_trend_pivot = ct_trend_pivot.fillna(0)
+    ).reindex(columns=EXPENSE_YEARS, fill_value=0).reindex(GROUP_ORDER)
+    grp_trend_pivot = grp_trend_pivot.fillna(0)
 
-    # Add Total row
-    ct_trend_pivot.loc["Total"] = ct_trend_pivot.sum()
+    # Totals for pinned row
+    grp_totals = grp_trend_pivot.sum()
 
     col1, col2 = st.columns([2, 3])
     with col1:
-        ct_trend_display = ct_trend_pivot.copy()
-        ct_trend_display.columns = EXPENSE_YEAR_LABELS
-        for col in ct_trend_display.columns:
-            ct_trend_display[col] = ct_trend_display[col].apply(fmt)
-        st.dataframe(ct_trend_display, use_container_width=True)
+        grp_trend_display = grp_trend_pivot.copy()
+        grp_trend_display.columns = EXPENSE_YEAR_LABELS
+        for col in grp_trend_display.columns:
+            grp_trend_display[col] = grp_trend_display[col].apply(fmt)
+        st.dataframe(grp_trend_display, use_container_width=True)
+        # Pinned Total row
+        total_cells = "".join(f"<td>{fmt(grp_totals.get(y, 0))}</td>" for y in EXPENSE_YEARS)
+        st.markdown(
+            f'<div style="background:#1e293b; border:1px solid #334155; border-radius:6px; '
+            f'padding:0; margin-top:-10px; margin-bottom:4px;">'
+            f'<table style="width:100%; border-collapse:collapse; color:#f1f5f9; font-size:0.85rem;">'
+            f'<tr style="font-weight:700;">'
+            f'<td style="padding:8px 12px; min-width:160px;">Total</td>'
+            f'{total_cells}'
+            f'</tr></table></div>',
+            unsafe_allow_html=True,
+        )
 
     with col2:
-        fig_ct = go.Figure()
-        for ct in COST_TYPES:
-            row = ct_trend_pivot.loc[ct] if ct in ct_trend_pivot.index else pd.Series(0, index=EXPENSE_YEARS)
-            fig_ct.add_trace(go.Bar(
+        fig_grp = go.Figure()
+        for grp in GROUP_ORDER:
+            row = grp_trend_pivot.loc[grp] if grp in grp_trend_pivot.index else pd.Series(0, index=EXPENSE_YEARS)
+            fig_grp.add_trace(go.Bar(
                 x=EXPENSE_YEAR_LABELS,
                 y=[row.get(y, 0) for y in EXPENSE_YEARS],
-                name=ct,
-                marker_color=COST_TYPE_COLORS.get(ct, "#94a3b8"),
-                hovertemplate=f"{ct}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
+                name=grp,
+                marker_color=GROUP_COLORS.get(grp, "#94a3b8"),
+                hovertemplate=f"{grp}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
             ))
-        fig_ct.update_layout(
+        fig_grp.update_layout(
             template=CHART_TEMPLATE, barmode="stack",
             xaxis=dict(title=""), yaxis=dict(title="Avg Cost per Turn ($)"),
             legend=dict(orientation="h", y=-0.15, font=dict(size=11)),
             margin=dict(t=10, b=50, l=10, r=10), height=340,
         )
-        st.plotly_chart(fig_ct, use_container_width=True)
+        st.plotly_chart(fig_grp, use_container_width=True)
 
     # ══════════════════════════════════════════════════
     # DETAILED EXPENSE ANALYSIS BY BUDGET CATEGORY
@@ -883,6 +976,22 @@ if view == "3 — Property Summary":
                 d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
                 d["Line Item Notes"] = d["Line Item Notes"].fillna("")
                 st.dataframe(d, use_container_width=True, hide_index=True)
+
+        # Floor Plan Comparison table — category × turn matrix for these 5 turns
+        fp_comp_keys = last5["Turn Key"].tolist()
+        fp_comp_lines = fp_lines[fp_lines["Turn Key"].isin(fp_comp_keys)].copy()
+        fp_comp_info = last5[["Turn Key", "Unit Label", "Move-Out Date", "Floor Plan"]].copy()
+        fp_comp_html = render_floor_plan_comparison_table(fp_comp_lines, fp_comp_info)
+        section(f"Same Floor Plan Turns — {fp_label}")
+        st.markdown(
+            f'<div class="scope-card scope-card-history">'
+            f'<p class="scope-title">Category Cost Comparison — Last 5 Full Turns</p>'
+            f'<p class="scope-subtitle">Compare category-level costs across the most recent {len(last5)} Full Turns'
+            f'{" for " + selected_fp + " units" if selected_fp != "All Floor Plans" else ""} at {prop}</p>'
+            f'{fp_comp_html}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     # ══════════════════════════════════════════════════
     # CATEGORY OUTLIERS — THIS PROPERTY
@@ -1287,6 +1396,100 @@ elif view == "4 — Unit Search":
             unsafe_allow_html=True,
         )
 
+        # ── Export Work History (Excel / PDF) ──
+        if hist_years:
+            # Build export DataFrame: category × year pivot
+            work_exp = unit_df.copy()
+            work_exp["Year"] = work_exp["Move-Out Date"].dt.year
+            work_pivot_exp = work_exp.pivot_table(
+                index="Budget Category", columns="Year",
+                values="Invoice Amount", aggfunc="sum", fill_value=0,
+            ).reindex(columns=hist_years, fill_value=0)
+            ALL_CATS_EXP = CORE_LABOR + CORE_MATERIALS + OTHER_CATS
+            group_labels = {}
+            for c in CORE_LABOR:
+                group_labels[c] = "Core Labor"
+            for c in CORE_MATERIALS:
+                group_labels[c] = "Core Materials"
+            for c in OTHER_CATS:
+                group_labels[c] = "Other"
+            rows = []
+            for c in ALL_CATS_EXP:
+                row = {"Category": c, "Group": group_labels.get(c, "")}
+                for y in hist_years:
+                    row[str(int(y))] = work_pivot_exp.loc[c, y] if c in work_pivot_exp.index else 0
+                rows.append(row)
+            hist_export_df = pd.DataFrame(rows)
+            # Add total row
+            total_row_exp = {"Category": "Total", "Group": ""}
+            for y in hist_years:
+                total_row_exp[str(int(y))] = hist_totals.get(y, 0)
+            hist_export_df = pd.concat([hist_export_df, pd.DataFrame([total_row_exp])], ignore_index=True)
+
+            # Excel
+            hist_xl_buf = io.BytesIO()
+            with pd.ExcelWriter(hist_xl_buf, engine="openpyxl") as writer:
+                summary_data = {
+                    "Property": [prop_choice], "Unit": [unit_choice],
+                    "Floor Plan": [unit_df.iloc[0]["Floor Plan"] if len(unit_df) > 0 else ""],
+                    "Categories Touched": [f"{cats_touched} / {total_cats}"],
+                    "Generated": [pd.Timestamp.now().strftime("%B %d, %Y")],
+                }
+                pd.DataFrame(summary_data).to_excel(writer, sheet_name="Summary", index=False)
+                hist_export_df.to_excel(writer, sheet_name="Work History", index=False)
+            hist_xl_buf.seek(0)
+            hist_xl_name = f"{prop_choice}_{unit_choice}_work_history_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx"
+
+            # PDF
+            hist_pdf = FPDF(orientation="L", unit="mm", format="A4")
+            hist_pdf.set_auto_page_break(auto=True, margin=15)
+            hist_pdf.add_page()
+            hist_pdf.set_font("Helvetica", "B", 14)
+            hist_pdf.cell(0, 10, f"Unit Work History — {prop_choice} — Unit {unit_choice}", ln=True)
+            hist_pdf.set_font("Helvetica", "", 9)
+            fp_label_pdf = unit_df.iloc[0]["Floor Plan"] if len(unit_df) > 0 else ""
+            hist_pdf.cell(0, 6, f"Floor Plan: {fp_label_pdf}  |  {cats_touched} of {total_cats} categories touched  |  Generated {pd.Timestamp.now().strftime('%B %d, %Y')}", ln=True)
+            hist_pdf.ln(4)
+
+            # Table header
+            year_strs = [str(int(y)) for y in hist_years]
+            cat_col_w = 60
+            grp_col_w = 35
+            yr_col_w = min(28, (297 - 20 - cat_col_w - grp_col_w) / max(len(hist_years), 1))
+            hist_pdf.set_font("Helvetica", "B", 8)
+            hist_pdf.cell(cat_col_w, 7, "Category", border=1)
+            hist_pdf.cell(grp_col_w, 7, "Group", border=1)
+            for ys in year_strs:
+                hist_pdf.cell(yr_col_w, 7, ys, border=1, align="R")
+            hist_pdf.ln()
+
+            # Table rows
+            hist_pdf.set_font("Helvetica", "", 8)
+            for _, r in hist_export_df.iterrows():
+                is_total = r["Category"] == "Total"
+                if is_total:
+                    hist_pdf.set_font("Helvetica", "B", 8)
+                hist_pdf.cell(cat_col_w, 6, str(r["Category"]), border=1)
+                hist_pdf.cell(grp_col_w, 6, str(r["Group"]), border=1)
+                for ys in year_strs:
+                    val = r.get(ys, 0)
+                    hist_pdf.cell(yr_col_w, 6, fmt(val) if val != 0 else "—", border=1, align="R")
+                hist_pdf.ln()
+                if is_total:
+                    hist_pdf.set_font("Helvetica", "", 8)
+
+            hist_pdf_buf = io.BytesIO(hist_pdf.output())
+            hist_pdf_name = f"{prop_choice}_{unit_choice}_work_history_{pd.Timestamp.now().strftime('%Y%m%d')}.pdf"
+
+            dl1, dl2, _ = st.columns([1, 1, 4])
+            with dl1:
+                st.download_button("📥 Excel", hist_xl_buf, file_name=hist_xl_name,
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                   key="hist_xl")
+            with dl2:
+                st.download_button("📥 PDF", hist_pdf_buf, file_name=hist_pdf_name,
+                                   mime="application/pdf", key="hist_pdf")
+
         # Vendor summary — all turns
         vendor_brkdn = (
             unit_df.groupby("Vendor Name")["Invoice Amount"]
@@ -1427,12 +1630,22 @@ elif view == "4 — Unit Search":
                     f"Unadjusted baseline: {fmt(projected_total)}."
                 )
 
-            # Visual checklist — projected scope with recently-done flagging
+            # Visual checklist — projected scope with comp columns
             expected_count = sum(1 for c in CORE_LABOR + CORE_MATERIALS + OTHER_CATS
                                  if proj_amounts.get(c, 0) > 0 and c not in excluded_recent)
             total_cats = len(CORE_LABOR) + len(CORE_MATERIALS) + len(OTHER_CATS)
+
+            # Build comp info for table columns
+            comp_info_df = comp_lines.groupby("Turn Key").agg(
+                Unit_Label=("Unit Label", "first"),
+                Move_Out_Date=("Move-Out Date", "first"),
+                Turn_Type=("Turn Type", "first"),
+            ).reset_index()
+            comp_info_df.columns = ["Turn Key", "Unit Label", "Move-Out Date", "Turn Type"]
+
             proj_checklist_html = render_projected_scope_table(
                 proj_amounts, excluded_recent, last_done_year, amount_label="Projected Cost",
+                comp_lines=comp_lines, comp_info=comp_info_df,
             )
             st.markdown(
                 f'<div class="scope-card scope-card-projected">'
@@ -1576,120 +1789,6 @@ elif view == "4 — Unit Search":
                     f"<strong>Action:</strong> Prioritize scope validation on the top 3 categories — "
                     f"confirm necessity before approving work orders to avoid scope creep."
                 )
-
-            # ══════════════════════════════════════════════════
-            # COMPARABLE TURNS USED (Item 2)
-            # ══════════════════════════════════════════════════
-            section("Comparable Turns Used")
-            comp_summary = comp_lines.groupby("Turn Key").agg(
-                Unit=("Unit Label", "first"),
-                Floor_Plan=("Floor Plan", "first"),
-                Move_Out=("Move-Out Date", "first"),
-                Turn_Type=("Turn Type", "first"),
-                Total_Cost=("Invoice Amount", "sum"),
-                Categories=("Budget Category", "nunique"),
-            ).reset_index(drop=True)
-            comp_summary = comp_summary.sort_values("Move_Out", ascending=False).reset_index(drop=True)
-            comp_display = comp_summary.copy()
-            comp_display["Move_Out"] = comp_display["Move_Out"].dt.strftime("%b %Y")
-            comp_display["Total_Cost"] = comp_display["Total_Cost"].apply(lambda x: fmt(x))
-            comp_display.columns = ["Unit", "Floor Plan", "Move-Out", "Turn Type", "Total Cost", "Categories"]
-            st.dataframe(comp_display, use_container_width=True, hide_index=True)
-            st.caption(
-                f"These {len(comp_summary)} turns were used to calculate the projected scope above. "
-                f"Category averages are derived from the combined line items across all comps."
-            )
-
-            # ══════════════════════════════════════════════════
-            # FLOOR PLAN COMPARISON (Item 5)
-            # ══════════════════════════════════════════════════
-            if unit_floor_plan:
-                # Find 5 most recent turns with same floor plan at same property (exclude current unit)
-                fp_all = _df_all[
-                    (_df_all["Property Name"] == prop_choice)
-                    & (_df_all["Floor Plan"] == unit_floor_plan)
-                    & (_df_all["Unit Label"] != unit_choice)
-                ].copy()
-                if len(fp_all) > 0:
-                    fp_turn_info = (
-                        fp_all.groupby("Turn Key").agg(
-                            Unit_Label=("Unit Label", "first"),
-                            Move_Out_Date=("Move-Out Date", "first"),
-                            Turn_Type=("Turn Type", "first"),
-                            total_cost=("Invoice Amount", "sum"),
-                        ).reset_index()
-                    )
-                    fp_turn_info = fp_turn_info.sort_values("Move_Out_Date", ascending=False).head(5)
-                    fp_turn_info.columns = ["Turn Key", "Unit Label", "Move-Out Date", "Turn Type", "total_cost"]
-                    fp_comp_keys = fp_turn_info["Turn Key"].tolist()
-                    fp_comp_lines = fp_all[fp_all["Turn Key"].isin(fp_comp_keys)].copy()
-
-                    section(f"Floor Plan Comparison — {unit_floor_plan}")
-                    fp_table_html = render_floor_plan_comparison_table(fp_comp_lines, fp_turn_info)
-                    st.markdown(
-                        f'<div class="scope-card scope-card-history">'
-                        f'<p class="scope-title">Same Floor Plan Turns — {unit_floor_plan} at {prop_choice}</p>'
-                        f'<p class="scope-subtitle">Most recent {len(fp_turn_info)} turns on {unit_floor_plan} units (excluding this unit) — compare category-level costs</p>'
-                        f'{fp_table_html}'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-
-            # ══════════════════════════════════════════════════
-            # VENDOR RECOMMENDATIONS (Item 3)
-            # ══════════════════════════════════════════════════
-            section("Vendor Recommendations")
-            vendor_cutoff = pd.Timestamp.now() - pd.DateOffset(years=2)
-            recent_prop_lines = _df_all[
-                (_df_all["Property Name"] == prop_choice)
-                & (_df_all["Move-Out Date"] >= vendor_cutoff)
-            ].copy()
-
-            # Only show categories that are in the active projection (adjusted_amounts > 0)
-            active_cats = [c for c in adjusted_amounts.index if adjusted_amounts[c] > 0]
-            if len(active_cats) > 0 and len(recent_prop_lines) > 0:
-                vendor_rows = []
-                for cat in active_cats:
-                    cat_lines = recent_prop_lines[recent_prop_lines["Budget Category"] == cat]
-                    if len(cat_lines) == 0:
-                        continue
-                    # Count turns per vendor for this category
-                    vendor_stats = (
-                        cat_lines.groupby("Vendor Name").agg(
-                            turns_used=("Turn Key", "nunique"),
-                            total_spend=("Invoice Amount", "sum"),
-                            last_used=("Move-Out Date", "max"),
-                        ).reset_index()
-                    )
-                    vendor_stats["avg_cost"] = vendor_stats["total_spend"] / vendor_stats["turns_used"]
-                    # Pick vendor with most turns (break ties by most recent)
-                    best = vendor_stats.sort_values(
-                        ["turns_used", "last_used"], ascending=[False, False]
-                    ).iloc[0]
-                    vendor_rows.append({
-                        "Category": cat,
-                        "Recommended Vendor": best["Vendor Name"],
-                        "Times Used": int(best["turns_used"]),
-                        "Avg Cost": fmt(best["avg_cost"]),
-                        "Last Used": best["last_used"].strftime("%b %Y") if pd.notna(best["last_used"]) else "—",
-                    })
-
-                if vendor_rows:
-                    # Sort by standard category order
-                    ALL_CATS_ORDER = CORE_LABOR + CORE_MATERIALS + OTHER_CATS
-                    cat_rank = {c: i for i, c in enumerate(ALL_CATS_ORDER)}
-                    vendor_rows.sort(key=lambda r: cat_rank.get(r["Category"], 999))
-                    vendor_df = pd.DataFrame(vendor_rows)
-                    st.dataframe(vendor_df, use_container_width=True, hide_index=True)
-                    insight(
-                        f"<strong>Vendor Guidance:</strong> Based on the last 2 years at <strong>{prop_choice}</strong>. "
-                        f"Vendors shown handled each category most frequently — consider getting <strong>competitive bids</strong> "
-                        f"on the top 3 categories by projected cost to target savings."
-                    )
-                else:
-                    st.caption("No recent vendor activity found for projected categories at this property.")
-            else:
-                st.caption("No recent vendor data available for the projected scope categories.")
 
         else:
             # Fallback: no comps found at all
