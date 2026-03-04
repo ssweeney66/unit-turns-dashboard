@@ -2363,6 +2363,9 @@ elif view == "5 — Rent Roll":
             unit_budget = fp_cost_map.get(unit_fp, avg_ft_cost)
             roi = (annual_lift / unit_budget * 100) if unit_budget > 0 and not is_renovated and unit_ltl > 0 else 0
 
+            move_in = row["Move-in"]
+            move_in_str = move_in.strftime("%b %d, %Y") if pd.notna(move_in) else "—"
+
             r = {
                 "Unit": unit_key,
                 "BD/BA": row["BD/BA"],
@@ -2370,6 +2373,7 @@ elif view == "5 — Rent Roll":
                 "Rent": fmt(rent) if rent else "",
                 "Loss to Lease": fmt(unit_ltl) if unit_ltl != 0 else "—",
                 "% Upside": f"{upside:.1f}%" if upside > 0 else "—",
+                "Move-In": move_in_str,
                 "Status": "Renovated" if is_renovated else "Classic",
                 "FT Budget": fmt(unit_budget) if not is_renovated else "—",
                 "ROI %": f"{roi:.0f}%" if roi > 0 else "—",
