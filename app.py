@@ -2165,9 +2165,18 @@ elif view == "5 — Rent Roll":
 
     # ── Woodman test ──
     _APP_DIR = Path(__file__).parent
-    rr_path = _APP_DIR / "Rent Rolls" / "Rent Roll - Woodman.xlsx"
+    _RR_DIR = _APP_DIR / "Rent Rolls"
+    rr_path = _RR_DIR / "Rent Roll - Woodman.xlsx"
     if not rr_path.exists():
-        st.error(f"Rent Roll file not found: {rr_path}")
+        # Debug: show what files actually exist
+        if _RR_DIR.exists():
+            found = [f.name for f in _RR_DIR.iterdir()]
+            st.error(f"File not found at: {rr_path}")
+            st.info(f"Rent Rolls folder exists. Contents: {found}")
+        else:
+            all_items = [f.name for f in _APP_DIR.iterdir() if not f.name.startswith('.')]
+            st.error(f"Rent Rolls folder not found at: {_RR_DIR}")
+            st.info(f"App directory contents: {all_items}")
     else:
         rr = load_rent_roll(rr_path)
         turn_hist = build_turn_history("Woodman", _df_all)
