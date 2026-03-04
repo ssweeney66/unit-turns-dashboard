@@ -736,6 +736,7 @@ view = st.sidebar.radio("View", [
     "4 — Unit Search",
     "5 — Rent Roll",
     "6 — AI Data Review",
+    "7 — Data Health",
 ])
 
 st.sidebar.markdown("---")
@@ -2610,3 +2611,69 @@ Guidelines:
                 st.rerun()
 
         footer()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# VIEW 7: DATA HEALTH
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+elif view == "7 — Data Health":
+    banner("Data Health", "Data source freshness and update compliance")
+
+    import os
+    _APP_DIR = Path(__file__).parent
+    _STALE_DAYS = 90  # 3 months
+
+    def file_health(path, label):
+        """Return dict with file label, last modified, age in days, and health status."""
+        if not path.exists():
+            return {"Source": label, "File": path.name, "Last Updated": "Not found", "Age": "-", "Status": "\u274c Missing"}
+        mtime = datetime.fromtimestamp(os.path.getmtime(path))
+        age_days = (datetime.now() - mtime).days
+        status = "\u2705 Current" if age_days <= _STALE_DAYS else "\ud83d\udd34 Stale"
+        return {
+            "Source": label,
+            "File": path.name,
+            "Last Updated": mtime.strftime("%b %d, %Y"),
+            "Age": f"{age_days} days",
+            "Status": status,
+        }
+
+    health_rows = []
+
+    # Turn data
+    turn_path = _APP_DIR / "Unit Turns - AI Clean - 2.26.2026.xlsx"
+    health_rows.append(file_health(turn_path, "Unit Turn Data"))
+
+    # Rent rolls
+    _RR_DIR_H = _APP_DIR / "Rent Rolls"
+    rr_files = {
+        "Rent Roll — Woodman": "Rent Roll - Woodman.xlsx",
+        "Rent Roll — Monterey Park": "Rent Roll - MontereyPark.xlsx",
+        "Rent Roll — Collins": "Rent Roll - Collins.xlsx",
+    }
+    for label, fname in rr_files.items():
+        health_rows.append(file_health(_RR_DIR_H / fname, label))
+
+    # Vacancy
+    vac_path = _APP_DIR / "Vacancy" / "Unit Vacancy.xlsx"
+    health_rows.append(file_health(vac_path, "Unit Vacancy"))
+
+    health_df = pd.DataFrame(health_rows)
+
+    section("Data Source Status")
+    st.caption(f"Sources older than {_STALE_DAYS} days are flagged as stale  •  Target: update every 3 months")
+
+    st.dataframe(health_df, use_container_width=True, hide_index=True)
+
+    # Summary metrics
+    total_sources = len(health_rows)
+    current = sum(1 for r in health_rows if "\u2705" in r["Status"])
+    stale = sum(1 for r in health_rows if "\ud83d\udd34" in r["Status"])
+    missing = sum(1 for r in health_rows if "\u274c" in r["Status"])
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Total Sources", f"{total_sources}")
+    k2.metric("Current", f"{current}")
+    k3.metric("Stale / Missing", f"{stale + missing}", delta=f"-{stale + missing}" if (stale + missing) > 0 else "0")
+
+    footer()
