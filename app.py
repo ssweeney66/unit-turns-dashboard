@@ -2121,7 +2121,15 @@ elif view == "1 — Executive Summary":
 # VIEW 5: RENT ROLL
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "5 — Rent Roll":
-    banner("Rent Roll", "Current occupancy with historical turn activity — Woodman (Test)")
+    banner("Rent Roll", "Current occupancy with historical turn activity")
+
+    # ── Rent roll file registry ──
+    _RR_DIR = Path(__file__).parent / "Rent Rolls"
+    _RR_FILES = {
+        "Monterey Park": "Rent Roll - MontereyPark.xlsx",
+        "Woodman": "Rent Roll - Woodman.xlsx",
+        "Collins": "Rent Roll - Collins.xlsx",
+    }
 
     # ── Load rent roll ──
     @st.cache_data
@@ -2130,7 +2138,6 @@ elif view == "5 — Rent Roll":
         rr = pd.read_excel(path, header=8)
         rr = rr.dropna(how="all")
         rr = rr[rr["Unit"].notna() & ~rr["Unit"].astype(str).str.contains("Units|Total", na=False)]
-        # Filter out property address rows (Collins has one after header)
         rr = rr[~rr["Unit"].astype(str).str.contains("LLC|Properties", na=False)]
         rr["Market Rent"] = pd.to_numeric(rr["Market Rent"], errors="coerce")
         rr["Rent"] = pd.to_numeric(rr["Rent"], errors="coerce")
@@ -2161,14 +2168,62 @@ elif view == "5 — Rent Roll":
             history[str(unit).strip()] = entries
         return history
 
-    # ── Woodman test ──
-    _RR_DIR = Path(__file__).parent / "Rent Rolls"
-    rr_path = _RR_DIR / "Rent Roll - Woodman.xlsx"
-    if not rr_path.exists():
-        st.error("Rent Roll file not found. Ensure the Rent Rolls folder is in the repo.")
+    @st.cache_data
+    def get_ft_units(prop_name, _df_all):
+        """Return set of unit numbers that have had at least one Full Turn."""
+        ft = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Full Turn")]
+        return set(ft["Unit Number"].astype(str).str.strip())
+
+    # ── Portfolio Summary — Classic vs Full Turn ──
+    section("Portfolio Summary — Classic vs. Full Turn")
+    st.caption("Classic = unit with no Full Turn on record  •  Properties without rent rolls show turn data only")
+
+    summary_rows = []
+    for prop in PROPERTY_ORDER:
+        rr_file = _RR_FILES.get(prop)
+        rr_path = _RR_DIR / rr_file if rr_file else None
+        has_rr = rr_path is not None and rr_path.exists()
+
+        if has_rr:
+            rr_data = load_rent_roll(rr_path)
+            rr_units = set(rr_data["Unit"].astype(str).str.strip())
+            ft_units = get_ft_units(prop, _df_all)
+            n_units = len(rr_units)
+            n_ft = len(rr_units & ft_units)
+            n_classic = n_units - n_ft
+            classic_pct = pct(n_classic / n_units) if n_units else "-"
+            summary_rows.append({
+                "Property": prop,
+                "Units": n_units,
+                "Full Turns": n_ft,
+                "Classic": n_classic,
+                "Classic %": classic_pct,
+            })
+        else:
+            # Placeholder — no rent roll yet
+            summary_rows.append({
+                "Property": prop,
+                "Units": "-",
+                "Full Turns": "-",
+                "Classic": "-",
+                "Classic %": "-",
+            })
+
+    summary_df = pd.DataFrame(summary_rows)
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ── Property selector for unit-level detail ──
+    rr_props = [p for p in PROPERTY_ORDER if p in _RR_FILES and (_RR_DIR / _RR_FILES[p]).exists()]
+    if not rr_props:
+        st.info("No rent roll files found.")
     else:
+        prop_choice = st.selectbox("Select Property", rr_props)
+        rr_path = _RR_DIR / _RR_FILES[prop_choice]
         rr = load_rent_roll(rr_path)
-        turn_hist = build_turn_history("Woodman", _df_all)
+        turn_hist = build_turn_history(prop_choice, _df_all)
+        ft_units = get_ft_units(prop_choice, _df_all)
 
         # ── KPIs ──
         total_units = len(rr)
@@ -2176,16 +2231,18 @@ elif view == "5 — Rent Roll":
         total_rent = rr["Rent"].sum()
         ltl = total_market - total_rent
         ltl_pct = ltl / total_market if total_market else 0
-        units_with_turns = sum(1 for u in rr["Unit"].astype(str).str.strip() if u in turn_hist)
+        rr_unit_set = set(rr["Unit"].astype(str).str.strip())
+        n_ft = len(rr_unit_set & ft_units)
+        n_classic = total_units - n_ft
 
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Total Units", f"{total_units}")
         k2.metric("Monthly Rent", fmt(total_rent))
         k3.metric("Loss to Lease", fmt(ltl), pct(ltl_pct))
-        k4.metric("Units w/ Turn History", f"{units_with_turns} of {total_units}")
+        k4.metric("Full Turns", f"{n_ft}")
+        k5.metric("Classic", f"{n_classic}", pct(n_classic / total_units) if total_units else "-")
 
         # ── Build combined table ──
-        # Determine max turn columns needed
         max_turns = max((len(v) for v in turn_hist.values()), default=0)
 
         display_rows = []
@@ -2198,18 +2255,15 @@ elif view == "5 — Rent Roll":
                 "Rent": fmt(row["Rent"]) if pd.notna(row["Rent"]) else "",
                 "Move-in": row["Move-in"].strftime("%b %Y") if pd.notna(row["Move-in"]) else "",
             }
-            # Turn history columns
             entries = turn_hist.get(unit_key, [])
             for i in range(max_turns):
-                col_name = f"Turn {i + 1}"
-                r[col_name] = entries[i] if i < len(entries) else ""
-
+                r[f"Turn {i + 1}"] = entries[i] if i < len(entries) else ""
             display_rows.append(r)
 
         display_df = pd.DataFrame(display_rows)
 
-        section("Rent Roll — Woodman")
-        st.caption(f"{total_units} units  •  Turn history from invoice data (most recent → oldest)")
+        section(f"Rent Roll — {prop_choice}")
+        st.caption(f"{total_units} units  •  {n_ft} full turns  •  {n_classic} classic  •  Turn history (most recent → oldest)")
 
         st.dataframe(display_df, use_container_width=True, hide_index=True, height=700)
 
