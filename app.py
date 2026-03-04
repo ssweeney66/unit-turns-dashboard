@@ -829,88 +829,14 @@ if view == "3 — Property Summary":
         st.plotly_chart(fig_fp, use_container_width=True)
 
     # ══════════════════════════════════════════════════
-    # EXPENSE SUMMARY BY CATEGORY GROUP
+    # EXPENSE ANALYSIS BY BUDGET CATEGORY
     # ══════════════════════════════════════════════════
-
-    section(f"Expense Group Trend by Year — {prop}")
-    st.caption("Average cost per Full Turn by category group — high-level summary of the detailed breakdown below")
-
     trend_lines = p_lines[p_lines["Year"].isin(EXPENSE_YEARS)].copy()
     trend_turn_counts = (
         p_turns[p_turns["Year"].isin(EXPENSE_YEARS)]
         .groupby("Year")["Turn Key"].nunique()
         .reindex(EXPENSE_YEARS, fill_value=0)
     )
-
-    # Map each budget category to its group
-    cat_to_group = {}
-    for c in CORE_LABOR:
-        cat_to_group[c] = "Core Labor"
-    for c in CORE_MATERIALS:
-        cat_to_group[c] = "Core Materials"
-    for c in OTHER_CATS:
-        cat_to_group[c] = "Other"
-    trend_lines["Category Group"] = trend_lines["Budget Category"].map(cat_to_group).fillna("Other")
-
-    GROUP_ORDER = ["Core Labor", "Core Materials", "Other"]
-    GROUP_COLORS = {"Core Labor": "#2563eb", "Core Materials": "#10b981", "Other": "#7c3aed"}
-
-    grp_year_spend = (
-        trend_lines.groupby(["Category Group", "Year"])["Invoice Amount"]
-        .sum().reset_index(name="total_spend")
-    )
-    grp_year_spend["n_turns"] = grp_year_spend["Year"].map(trend_turn_counts).fillna(0)
-    grp_year_spend["avg_per_turn"] = grp_year_spend.apply(
-        lambda r: r["total_spend"] / r["n_turns"] if r["n_turns"] > 0 else 0, axis=1
-    )
-
-    grp_trend_pivot = grp_year_spend.pivot_table(
-        index="Category Group", columns="Year",
-        values="avg_per_turn", fill_value=0
-    ).reindex(columns=EXPENSE_YEARS, fill_value=0).reindex(GROUP_ORDER)
-    grp_trend_pivot = grp_trend_pivot.fillna(0)
-
-    # Totals for pinned row
-    grp_totals = grp_trend_pivot.sum()
-
-    col1, col2 = st.columns([2, 3])
-    with col1:
-        # Add Total row
-        grp_trend_pivot.loc["Total"] = grp_totals
-        grp_trend_display = grp_trend_pivot.copy()
-        grp_trend_display.columns = EXPENSE_YEAR_LABELS
-        for col in grp_trend_display.columns:
-            grp_trend_display[col] = grp_trend_display[col].apply(fmt)
-        st.dataframe(
-            grp_trend_display.style.set_properties(
-                subset=pd.IndexSlice["Total", :],
-                **{"background-color": "#f1f5f9", "font-weight": "700", "border-top": "2px solid #cbd5e1"},
-            ),
-            use_container_width=True,
-        )
-
-    with col2:
-        fig_grp = go.Figure()
-        for grp in GROUP_ORDER:
-            row = grp_trend_pivot.loc[grp] if grp in grp_trend_pivot.index else pd.Series(0, index=EXPENSE_YEARS)
-            fig_grp.add_trace(go.Bar(
-                x=EXPENSE_YEAR_LABELS,
-                y=[row.get(y, 0) for y in EXPENSE_YEARS],
-                name=grp,
-                marker_color=GROUP_COLORS.get(grp, "#94a3b8"),
-                hovertemplate=f"{grp}<br>%{{x}}: $%{{y:,.0f}}<extra></extra>",
-            ))
-        fig_grp.update_layout(
-            template=CHART_TEMPLATE, barmode="stack",
-            xaxis=dict(title=""), yaxis=dict(title="Avg Cost per Turn ($)"),
-            legend=dict(orientation="h", y=-0.15, font=dict(size=11)),
-            margin=dict(t=10, b=50, l=10, r=10), height=340,
-        )
-        st.plotly_chart(fig_grp, use_container_width=True)
-
-    # ══════════════════════════════════════════════════
-    # DETAILED EXPENSE ANALYSIS BY BUDGET CATEGORY
-    # ══════════════════════════════════════════════════
     section(f"Expense Analysis by Budget Category — {prop}")
     st.caption(f"Average cost per Full Turn by budget category ({EXPENSE_YEARS[0]} – {expense_year_label(EXPENSE_YEARS[-1])})")
 
