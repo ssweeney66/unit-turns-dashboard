@@ -2131,6 +2131,11 @@ elif view == "5 — Rent Roll":
         "Woodman": "Rent Roll - Woodman.xlsx",
         "Collins": "Rent Roll - Collins.xlsx",
         "51 at the Village": "Rent Roll - 51Village.xlsx",
+        "Lindley": "Rent Roll - Lindley.xlsx",
+        "El Rancho": "Rent Roll - ElRancho.xlsx",
+        "Alta Vista": "Rent Roll - Alta Vista.xlsx",
+        "Roscoe": "Rent Roll - Roscoe.xlsx",
+        "Woodbridge": "Rent Roll - Woodbridge.xlsx",
     }
 
     # ── Load rent roll ──
@@ -2147,6 +2152,20 @@ elif view == "5 — Rent Roll":
         return rr
 
     # ── Unit mapping: rent roll → turn data ──
+    def _norm_unit(u):
+        """Normalize a unit identifier: strip known suffixes (HUD/MGR/BC),
+        then normalize leading zeros for purely numeric units ('01' → '1')."""
+        s = str(u).strip()
+        # Strip known suffixes (space- or hyphen-delimited)
+        for suffix in (" HUD", " MGR", " BC", "-MGR", " ASST. MGR"):
+            if s.upper().endswith(suffix.upper()):
+                s = s[:len(s) - len(suffix)].strip()
+                break
+        # Normalize leading zeros for purely numeric units
+        if s.isdigit() and len(s) > 1:
+            s = str(int(s))
+        return s
+
     def _normalize_mp_bldg(addr):
         """Normalize a Monterey Park building address to match turn data Building Code format.
         E.g. '511 W Pomona Blvd' → '511 Pomona', '2425 Hendricks Ave' → '2425 Hendericks'."""
@@ -2173,14 +2192,15 @@ elif view == "5 — Rent Roll":
         u = str(rr_unit_str).strip()
 
         if prop_name == "Collins":
-            # "39-01" → "18339 Collins|01", "39-21-MGR" → "18339 Collins|21"
+            # "39-01" → "18339 Collins|1", "39-21-MGR" → "18339 Collins|21"
             parts = u.split("-")
             if len(parts) >= 2:
-                prefix, unit_num = parts[0], parts[1]
+                prefix = parts[0]
+                unit_num = _norm_unit(parts[1])
                 bldg = {"39": "18339 Collins", "47": "18347 Collins"}.get(prefix)
                 if bldg:
                     return f"{bldg}|{unit_num}"
-            return u
+            return _norm_unit(u)
 
         elif prop_name == "Monterey Park":
             # "505 Pomona, Unit A" → "505 Pomona|A"
@@ -2202,8 +2222,8 @@ elif view == "5 — Rent Roll":
             return f"{norm_bldg}|{unit_letter}" if unit_letter else norm_bldg
 
         else:
-            # Woodman, 51 at the Village: direct match, no building code
-            return u
+            # All other properties: strip suffixes, normalize leading zeros
+            return _norm_unit(u)
 
     # ── Build turn history columns for a property ──
     TURN_ABBR = {"Full Turn": "FT", "Make Ready": "MR", "Partial Turn": "PT"}
@@ -2212,12 +2232,12 @@ elif view == "5 — Rent Roll":
     def build_turn_history(prop_name, _df_all):
         """Return a dict: compound_key → list of 'FT 2025 - $26,000' strings (most recent first).
         Compound key is 'BuildingCode|UnitNumber' for properties with building codes,
-        or just 'UnitNumber' for direct-match properties (Woodman, 51Village)."""
+        or just 'UnitNumber' for direct-match properties."""
         prop_lines = _df_all[_df_all["Property Name"] == prop_name].copy()
         prop_lines["Move-Out Date"] = pd.to_datetime(prop_lines["Move-Out Date"], errors="coerce")
-        # Build compound key from turn data
+        # Build compound key from turn data (normalize unit numbers for consistent matching)
         prop_lines["_bldg"] = prop_lines["Building Code"].fillna("").astype(str).str.strip()
-        prop_lines["_unit"] = prop_lines["Unit Number"].astype(str).str.strip()
+        prop_lines["_unit"] = prop_lines["Unit Number"].astype(str).str.strip().apply(_norm_unit)
         prop_lines["_key"] = prop_lines.apply(
             lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
         )
@@ -2242,7 +2262,7 @@ elif view == "5 — Rent Roll":
         """Return set of compound keys for units that have had at least one Full Turn."""
         ft = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Full Turn")].copy()
         ft["_bldg"] = ft["Building Code"].fillna("").astype(str).str.strip()
-        ft["_unit"] = ft["Unit Number"].astype(str).str.strip()
+        ft["_unit"] = ft["Unit Number"].astype(str).str.strip().apply(_norm_unit)
         ft["_key"] = ft.apply(
             lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
         )
@@ -2382,10 +2402,15 @@ elif view == "6 — Data Health":
     # Rent rolls
     _RR_DIR_H = _APP_DIR / "Rent Rolls"
     rr_files = {
-        "Rent Roll — Woodman": "Rent Roll - Woodman.xlsx",
         "Rent Roll — Monterey Park": "Rent Roll - MontereyPark.xlsx",
+        "Rent Roll — Woodman": "Rent Roll - Woodman.xlsx",
         "Rent Roll — Collins": "Rent Roll - Collins.xlsx",
         "Rent Roll — 51 at the Village": "Rent Roll - 51Village.xlsx",
+        "Rent Roll — Lindley": "Rent Roll - Lindley.xlsx",
+        "Rent Roll — El Rancho": "Rent Roll - ElRancho.xlsx",
+        "Rent Roll — Alta Vista": "Rent Roll - Alta Vista.xlsx",
+        "Rent Roll — Roscoe": "Rent Roll - Roscoe.xlsx",
+        "Rent Roll — Woodbridge": "Rent Roll - Woodbridge.xlsx",
     }
     for label, fname in rr_files.items():
         health_rows.append(file_health(_RR_DIR_H / fname, label))
