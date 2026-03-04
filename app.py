@@ -6,10 +6,12 @@ import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
 import io
+import os
 from openai import OpenAI
 from anthropic import Anthropic
 from google import genai as google_genai
 from fpdf import FPDF
+from openpyxl.styles import Font
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIG
@@ -954,6 +956,7 @@ if view == "3 — Property Summary":
         fp_comp_keys = last5["Turn Key"].tolist()
         fp_comp_lines = fp_lines[fp_lines["Turn Key"].isin(fp_comp_keys)].copy()
         fp_comp_info = last5[["Turn Key", "Unit Label", "Move-Out Date", "Floor Plan"]].copy()
+        fp_comp_info["Turn Type"] = "Full Turn"
         fp_comp_html = render_floor_plan_comparison_table(fp_comp_lines, fp_comp_info)
         st.markdown(
             f'<div class="scope-card scope-card-history">'
@@ -996,13 +999,13 @@ if view == "3 — Property Summary":
     position = "above" if vs_port > 0 else "below"
     insight_text = (
         f"<strong>{prop}</strong> averages <strong>{fmt(avg_cost)}</strong>/turn — "
-        f"<strong>{pct(vs_port)}</strong> {position} the portfolio average. "
+        f"<strong>{abs(vs_port):.1f}%</strong> {position} the portfolio average. "
         f"<strong>{top_cat}</strong> is the largest expense category at <strong>{top_cat_pct:.0f}%</strong> of spend — "
         f"{'negotiate better rates or standardize scope for this category to reduce costs.' if vs_port > 10 else 'this is in line with portfolio norms.'}"
     )
     if prop_yoy is not None:
         insight_text += (
-            f" Year-over-year costs {'increased' if prop_yoy > 0 else 'decreased'} <strong>{pct(prop_yoy)}</strong> "
+            f" Year-over-year costs {'increased' if prop_yoy > 0 else 'decreased'} <strong>{abs(prop_yoy):.1f}%</strong> "
             f"from 2024 to 2025{'— investigate what changed in scope or vendor pricing.' if prop_yoy > 15 else '.'}"
         )
     insight(insight_text)
@@ -1356,7 +1359,6 @@ elif view == "4 — Unit Search":
                 ws = writer.sheets["Work History"]
                 fp_xl = unit_df.iloc[0]["Floor Plan"] if len(unit_df) > 0 else ""
                 ws.cell(row=1, column=1, value=f"{prop_choice}  |  Unit {unit_choice}  |  {fp_xl}  |  {cats_touched} of {total_cats} categories  |  {pd.Timestamp.now().strftime('%B %d, %Y')}")
-                from openpyxl.styles import Font
                 ws.cell(row=1, column=1).font = Font(bold=True, size=11)
             hist_xl_buf.seek(0)
             hist_xl_name = f"{prop_choice}_{unit_choice}_work_history_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx"
@@ -1613,7 +1615,7 @@ elif view == "4 — Unit Search":
                 scope_export_df.to_excel(writer, sheet_name="Scope Detail", index=False)
             excel_buf.seek(0)
             exp_c1.download_button(
-                "Download Excel",
+                "📥 Excel",
                 data=excel_buf.getvalue(),
                 file_name=f"{prop_choice}_{unit_choice}_scope_{today_str}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1656,7 +1658,7 @@ elif view == "4 — Unit Search":
             pdf.output(pdf_buf)
             pdf_buf.seek(0)
             exp_c2.download_button(
-                "Download PDF",
+                "📥 PDF",
                 data=pdf_buf.getvalue(),
                 file_name=f"{prop_choice}_{unit_choice}_scope_{today_str}.pdf",
                 mime="application/pdf",
@@ -1847,7 +1849,7 @@ elif view == "1 — Executive Summary":
         avg_cost=("total_cost", "mean"),
         median_cost=("total_cost", "median"),
         total_spend=("total_cost", "sum"),
-        avg_duration=("Duration", "median"),
+        med_duration=("Duration", "median"),
     ).reset_index().sort_values("avg_cost", ascending=False)
 
     # Add rank (1 = highest avg cost)
@@ -1878,10 +1880,10 @@ elif view == "1 — Executive Summary":
         st.plotly_chart(fig_bench, use_container_width=True)
 
     with col2:
-        pb_display = prop_bench[["Rank", "Property Name", "turns", "avg_cost", "vs Portfolio", "avg_duration"]].copy()
+        pb_display = prop_bench[["Rank", "Property Name", "turns", "avg_cost", "vs Portfolio", "med_duration"]].copy()
         pb_display["avg_cost"] = pb_display["avg_cost"].apply(fmt)
         pb_display["vs Portfolio"] = pb_display["vs Portfolio"].apply(lambda x: pct(x))
-        pb_display["avg_duration"] = pb_display["avg_duration"].apply(lambda x: f"{x:.0f} days" if pd.notna(x) else "—")
+        pb_display["med_duration"] = pb_display["med_duration"].apply(lambda x: f"{x:.0f} days" if pd.notna(x) else "—")
         pb_display.columns = ["#", "Property", "Turns", "Avg Cost", "vs Portfolio", "Med Duration"]
         st.dataframe(pb_display, use_container_width=True, hide_index=True, height=480)
 
@@ -1977,18 +1979,15 @@ elif view == "1 — Executive Summary":
     if len(hist_data) >= 2:
         avg_turns = hist_data["turns"].mean()
         avg_cost_trend = hist_data["avg_cost"].mean()
-        projected_spend = avg_turns * avg_cost_trend
 
         # Cost trend (linear)
-        if len(hist_data) >= 2:
-            cost_slope = np.polyfit(hist_data["Year"], hist_data["avg_cost"], 1)
-            projected_cost_2026 = np.polyval(cost_slope, 2026)
-            projected_cost_2026 = max(projected_cost_2026, 0)
+        cost_slope = np.polyfit(hist_data["Year"], hist_data["avg_cost"], 1)
+        projected_cost_2026 = max(np.polyval(cost_slope, 2026), 0)
 
-            vol_slope = np.polyfit(hist_data["Year"], hist_data["turns"], 1)
-            projected_vol_2026 = max(np.polyval(vol_slope, 2026), 0)
+        vol_slope = np.polyfit(hist_data["Year"], hist_data["turns"], 1)
+        projected_vol_2026 = max(np.polyval(vol_slope, 2026), 0)
 
-            forecast_spend = projected_vol_2026 * projected_cost_2026
+        forecast_spend = projected_vol_2026 * projected_cost_2026
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("3-Year Avg Turns/Year", f"{avg_turns:.0f}")
@@ -2136,6 +2135,10 @@ elif view == "5 — Rent Roll":
         "Alta Vista": "Rent Roll - Alta Vista.xlsx",
         "Roscoe": "Rent Roll - Roscoe.xlsx",
         "Woodbridge": "Rent Roll - Woodbridge.xlsx",
+        "Darby": "Rent Roll - Darby.xlsx",
+        "Dickens": "Rent Roll - Dickens.xlsx",
+        "Fruitland": "Rent Roll - Fruitland.xlsx",
+        "Garfield": "Rent Roll - Garfield.xlsx",
     }
 
     # ── Load rent roll ──
@@ -2145,7 +2148,7 @@ elif view == "5 — Rent Roll":
         rr = pd.read_excel(path, header=8)
         rr = rr.dropna(how="all")
         rr = rr[rr["Unit"].notna() & ~rr["Unit"].astype(str).str.contains("Units|Total", na=False)]
-        rr = rr[~rr["Unit"].astype(str).str.contains("LLC|Properties", na=False)]
+        rr = rr[~rr["Unit"].astype(str).str.contains("LLC|Properties|, LP", na=False)]
         rr["Market Rent"] = pd.to_numeric(rr["Market Rent"], errors="coerce")
         rr["Rent"] = pd.to_numeric(rr["Rent"], errors="coerce")
         rr["Move-in"] = pd.to_datetime(rr["Move-in"], errors="coerce")
@@ -2154,13 +2157,16 @@ elif view == "5 — Rent Roll":
     # ── Unit mapping: rent roll → turn data ──
     def _norm_unit(u):
         """Normalize a unit identifier: strip known suffixes (HUD/MGR/BC),
-        then normalize leading zeros for purely numeric units ('01' → '1')."""
+        remove formatting hyphens ('12-A' → '12A'), normalize leading zeros ('01' → '1')."""
         s = str(u).strip()
         # Strip known suffixes (space- or hyphen-delimited)
         for suffix in (" HUD", " MGR", " BC", "-MGR", " ASST. MGR"):
             if s.upper().endswith(suffix.upper()):
                 s = s[:len(s) - len(suffix)].strip()
                 break
+        # Remove formatting hyphens in unit IDs ("12-A" → "12A")
+        if "-" in s:
+            s = s.replace("-", "")
         # Normalize leading zeros for purely numeric units
         if s.isdigit() and len(s) > 1:
             s = str(int(s))
@@ -2374,7 +2380,6 @@ elif view == "5 — Rent Roll":
 elif view == "6 — Data Health":
     banner("Data Health", "Data source freshness and update compliance")
 
-    import os
     _APP_DIR = Path(__file__).parent
     _STALE_DAYS = 90  # 3 months
 
@@ -2411,6 +2416,10 @@ elif view == "6 — Data Health":
         "Rent Roll — Alta Vista": "Rent Roll - Alta Vista.xlsx",
         "Rent Roll — Roscoe": "Rent Roll - Roscoe.xlsx",
         "Rent Roll — Woodbridge": "Rent Roll - Woodbridge.xlsx",
+        "Rent Roll — Darby": "Rent Roll - Darby.xlsx",
+        "Rent Roll — Dickens": "Rent Roll - Dickens.xlsx",
+        "Rent Roll — Fruitland": "Rent Roll - Fruitland.xlsx",
+        "Rent Roll — Garfield": "Rent Roll - Garfield.xlsx",
     }
     for label, fname in rr_files.items():
         health_rows.append(file_health(_RR_DIR_H / fname, label))
@@ -2435,7 +2444,7 @@ elif view == "6 — Data Health":
     k1, k2, k3 = st.columns(3)
     k1.metric("Total Sources", f"{total_sources}")
     k2.metric("Current", f"{current}")
-    k3.metric("Stale / Missing", f"{stale + missing}", delta=f"-{stale + missing}" if (stale + missing) > 0 else "0")
+    k3.metric("Stale / Missing", f"{stale + missing}", delta=f"-{stale + missing}" if (stale + missing) > 0 else None)
 
     footer()
 
@@ -2522,9 +2531,9 @@ elif view == "7 — AI Data Review":
             ct_stats = _ft_lines.groupby("Cost Type")["Invoice Amount"].agg(["sum", "count"]).sort_values("sum", ascending=False)
             num_ft = len(_ft_turns)
             for ct, row in ct_stats.iterrows():
-                pct = row["sum"] / ft_total_spend * 100 if ft_total_spend > 0 else 0
+                ct_pct = row["sum"] / ft_total_spend * 100 if ft_total_spend > 0 else 0
                 avg_per_turn = row["sum"] / num_ft if num_ft > 0 else 0
-                lines.append(f"  {ct}: ${row['sum']:,.0f} ({pct:.1f}% of spend), ${avg_per_turn:,.0f} avg/turn, {int(row['count'])} invoices")
+                lines.append(f"  {ct}: ${row['sum']:,.0f} ({ct_pct:.1f}% of spend), ${avg_per_turn:,.0f} avg/turn, {int(row['count'])} invoices")
 
         # ── C. Property × Year Matrix ──
         lines.append("\n=== PROPERTY × YEAR DETAIL (Full Turns) ===")
@@ -2603,9 +2612,10 @@ Key definitions:
 - Turn Key: Unique identifier for each turn event (Property + Unit + Move-Out Date)
 - Duration: Days from move-out to last invoice (renovation timeline)
 - Cost Types: Materials, Labor, Mixed, Fee — every invoice line is classified into one of these
-- Budget Categories (17 total):
-  Materials: Supplies, Appliances, Flooring Materials, Cabinets Materials, Countertops Materials, Windows
-  Labor: Labor General, Flooring Labor, Electric General, Countertops Labor, Plumbing, Powerwash and Demo, Management Fee, Scrape Ceiling, Glaze, Cabinets Labor, Paint
+- Budget Categories (17 total, grouped):
+  Core Labor (7): Paint, Labor General, Flooring Labor, Electric General, Countertops Labor, Plumbing, Cabinets Labor
+  Core Materials (4): Appliances, Flooring Materials, Cabinets Materials, Countertops Materials
+  Other (6): Supplies, Powerwash and Demo, Management Fee, Scrape Ceiling, Glaze, Windows
 
 Available data below includes:
 - Portfolio overview and yearly trends

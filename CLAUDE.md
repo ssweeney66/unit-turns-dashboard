@@ -11,12 +11,12 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `app.py` — single-file dashboard (~2,750 lines)
+- **File:** `app.py` — single-file dashboard (~2,790 lines)
 - **Data:** `Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Live URL:** `https://unit-turns-dashboard-t2yhaxw6dfvmrqixmdxprz.streamlit.app/`
 - **Auth:** Password gate via `st.secrets["password"]` — set in Streamlit Cloud Settings → Secrets
-- **Stack:** Streamlit 1.54.0, Pandas 2.3.3, Plotly 6.5.2, OpenAI, Anthropic, Google GenAI
+- **Stack:** Streamlit 1.54.0, Pandas 2.3.3, Plotly 6.5.2, OpenAI, Anthropic, Google GenAI, fpdf2
 
 ## Dashboard Structure (7 Tabs)
 
@@ -35,11 +35,12 @@
 - **Key columns:** Property Name, Building Code, Unit Number, Floor Plan, Move-Out Date, Turn Type, Vendor Name, Invoice Amount, Budget Category, Cost Type
 
 ### Rent Rolls (folder: `Rent Rolls/`)
-- **Active files (9):** Woodman, MontereyPark, Collins, 51Village, Lindley, ElRancho, Alta Vista, Roscoe, Woodbridge
+- **Active files (13):** Woodman, MontereyPark, Collins, 51Village, Lindley, ElRancho, Alta Vista, Roscoe, Woodbridge, Darby, Dickens, Fruitland, Garfield
 - **Pending files (2):** 12756Moorpark, 12800Moorpark — no matching property in turn data yet
+- **Missing:** Topanga — no rent roll file exists
 - **Format:** 8 metadata header rows (skip), header at row 8, 2 footer/summary rows to filter out
 - **Columns (5):** Unit, BD/BA, Market Rent, Rent, Move-in
-- **Cleanup:** `header=8`, drop all-NaN rows, filter out rows where Unit contains "Units" or "Total", filter out rows with "LLC" or "Properties"
+- **Cleanup:** `header=8`, drop all-NaN rows, filter out rows where Unit contains "Units" or "Total", filter out rows with "LLC", "Properties", or ", LP"
 - **Unit suffixes:** Some rent rolls include suffixes like "HUD" (subsidized), "MGR" (manager unit), "BC" — these are stripped by `_norm_unit()` before matching
 
 ### Rent Roll <> Turn Data Unit Mapping
@@ -54,6 +55,10 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - **Alta Vista:** "01" -> "1" (leading zero stripped; turn data uses "1")
 - **Roscoe:** "101" -> "101" (3-digit, no leading zero issue)
 - **Woodbridge:** "01" -> "1" (leading zero stripped; turn data uses "1")
+- **Darby:** "101" -> "101" (3-digit, direct match)
+- **Dickens:** "12-A" -> "12A" (hyphen removed by `_norm_unit`); "07 MGR" -> "7" (suffix stripped + leading zero)
+- **Fruitland:** "01" -> "1" (leading zero stripped); "09 MGR" -> "9" (suffix + leading zero)
+- **Garfield:** "616" -> "616", "616A" -> "616A", "618 1/2" -> "618 1/2" (kept as-is)
 
 **Compound key (Building Code + Unit Number):**
 - **Monterey Park:** "505 Pomona, Unit A" -> "505 Pomona|A". Address normalization strips directional prefixes (W, S) and suffixes (Ave, Blvd, Dr). Spelling correction: rent roll "Hendricks" = turn data "Hendericks". Unit suffixes like "- ASST. MGR" or "- HUD" stripped to single letter.
@@ -74,7 +79,7 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 ## Key Functions (Rent Roll Tab)
 
 - `load_rent_roll(path)` — loads/cleans a rent roll Excel file (5-column format)
-- `_norm_unit(u)` — normalizes a unit ID: strips suffixes (HUD/MGR/BC), normalizes leading zeros
+- `_norm_unit(u)` — normalizes a unit ID: strips suffixes (HUD/MGR/BC/ASST. MGR), removes formatting hyphens ("12-A" → "12A"), normalizes leading zeros
 - `_normalize_mp_bldg(addr)` — normalizes Monterey Park building addresses to match turn data
 - `rr_to_turn_key(prop_name, rr_unit_str)` — maps a rent roll unit to the compound key used in turn data
 - `build_turn_history(prop_name, _df_all)` — returns dict of compound_key -> list of turn strings ("FT 2025 - $26,000")
@@ -89,3 +94,7 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - All tables use standardized category grouping: Core Labor -> Core Materials -> Other
 - Classic % uses direct `f"{value * 100:.1f}%"` — do NOT use `pct()` (which is for YoY deltas with "+" prefix)
 - File paths on Streamlit Cloud must use `Path(__file__).parent` — never bare relative paths
+- When writing narrative insights with `pct()`, use `abs()` with directional words ("above"/"below") to avoid double-negatives like "-12.3% below"
+- Benchmark aggregations: use `median` for duration (named `med_duration`), `mean` for costs
+- Export button labels: use "📥 Excel" / "📥 PDF" (compact, consistent)
+- AI system prompt category grouping must match dashboard: Core Labor (7) / Core Materials (4) / Other (6)
