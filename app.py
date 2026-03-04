@@ -388,16 +388,17 @@ def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year,
             f'<span class="year-subtext">{tt_abbr} · {date_str}</span></th>'
         )
 
+    proj_col_style = 'style="background-color:#f1f5f9;"'
     header = (
         f'<tr><th style="width:32px;"></th><th>Category</th>'
-        f'<th>{amount_label}</th>{comp_hdrs}</tr>'
+        f'<th {proj_col_style}>{amount_label}</th>{comp_hdrs}</tr>'
     )
 
     # Projected total
     proj_total = sum(proj_amounts.get(c, 0) for c in ALL_CATS if c not in excluded_recent)
 
     # Total row
-    total_cells = f'<td class="year-val">{fmt(proj_total)}</td>'
+    total_cells = f'<td class="year-val" {proj_col_style}>{fmt(proj_total)}</td>'
     for tk in turn_keys:
         total_cells += f'<td class="year-val">{fmt(comp_totals.get(tk, 0))}</td>'
     total_row = f'<tr class="total-row"><td></td><td>Total</td>{total_cells}</tr>'
@@ -425,7 +426,7 @@ def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year,
                     f'<tr class="row-recent">'
                     f'<td class="status">&#8635;</td>'
                     f'<td>{c} <span style="font-size:11px;color:#94a3b8;">— done in {yr}</span></td>'
-                    f'<td class="year-val">{fmt(comp_amt, 2)}</td>'
+                    f'<td class="year-val" {proj_col_style}>{fmt(comp_amt)}</td>'
                     f'{comp_cells}'
                     f'</tr>'
                 )
@@ -434,7 +435,7 @@ def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year,
                     f'<tr class="row-done">'
                     f'<td class="status">&#10003;</td>'
                     f'<td>{c}</td>'
-                    f'<td>{fmt(amt, 2)}</td>'
+                    f'<td class="year-val" {proj_col_style}>{fmt(amt)}</td>'
                     f'{comp_cells}'
                     f'</tr>'
                 )
@@ -443,7 +444,7 @@ def render_projected_scope_table(proj_amounts, excluded_recent, last_done_year,
                     f'<tr class="row-skip">'
                     f'<td class="status">—</td>'
                     f'<td>{c}</td>'
-                    f'<td>—</td>'
+                    f'<td {proj_col_style}>—</td>'
                     f'{comp_cells}'
                     f'</tr>'
                 )
@@ -915,34 +916,13 @@ if view == "3 — Property Summary":
     if len(last5) == 0:
         st.info(f"No completed Full Turns found for {fp_label}.")
     else:
-        last5["#"] = range(1, len(last5) + 1)
-        last5["Completion"] = last5["completion_date"].dt.strftime("%b %d, %Y").fillna("—")
         last5["Move-Out"] = last5["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
-        last5["Cost"] = last5["total_cost"].apply(fmt)
-        last5["Dur"] = last5["Duration"].apply(lambda x: f"{x:.0f} days" if pd.notna(x) else "—")
 
-        l5_disp = last5[["#", "Unit Label", "Floor Plan", "Move-Out", "Completion",
-                         "Cost", "Dur", "line_items"]].copy()
-        l5_disp.columns = ["#", "Unit", "Floor Plan", "Move-Out", "Completion",
-                           "Total Cost", "Duration", "Invoices"]
-        st.dataframe(l5_disp, use_container_width=True, hide_index=True)
-
-        for _, t in last5.iterrows():
-            with st.expander(f"Detail — {t['Unit Label']} — {t['Move-Out']}"):
-                items = fp_lines[fp_lines["Turn Key"] == t["Turn Key"]].sort_values("Invoice Date")
-                d = items[["Vendor Name", "Budget Category", "Cost Type",
-                           "Invoice Amount", "Invoice Date", "Line Item Notes"]].copy()
-                d["Invoice Amount"] = d["Invoice Amount"].apply(lambda x: fmt(x, 2))
-                d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
-                d["Line Item Notes"] = d["Line Item Notes"].fillna("")
-                st.dataframe(d, use_container_width=True, hide_index=True)
-
-        # Floor Plan Comparison table — category × turn matrix for these 5 turns
+        # Category Cost Comparison table — category × turn matrix
         fp_comp_keys = last5["Turn Key"].tolist()
         fp_comp_lines = fp_lines[fp_lines["Turn Key"].isin(fp_comp_keys)].copy()
         fp_comp_info = last5[["Turn Key", "Unit Label", "Move-Out Date", "Floor Plan"]].copy()
         fp_comp_html = render_floor_plan_comparison_table(fp_comp_lines, fp_comp_info)
-        section(f"Same Floor Plan Turns — {fp_label}")
         st.markdown(
             f'<div class="scope-card scope-card-history">'
             f'<p class="scope-title">Category Cost Comparison — Last 5 Full Turns</p>'
@@ -953,58 +933,16 @@ if view == "3 — Property Summary":
             unsafe_allow_html=True,
         )
 
-    # ══════════════════════════════════════════════════
-    # CATEGORY OUTLIERS — THIS PROPERTY
-    # ══════════════════════════════════════════════════
-    section(f"Category Outliers — {prop}")
-    st.caption(
-        f"Turns where a budget category exceeded the {prop} average by more than 1.5 standard deviations "
-        f"(minimum 3 observations required)."
-    )
-
-    # Build per-category stats for this property
-    prop_cat = (
-        p_lines.groupby(["Budget Category", "Turn Key"])["Invoice Amount"]
-        .sum().reset_index()
-    )
-    prop_cat_stats = (
-        prop_cat.groupby("Budget Category")["Invoice Amount"]
-        .agg(["mean", "std", "count"]).reset_index()
-    )
-    prop_cat_stats["threshold"] = prop_cat_stats["mean"] + 1.5 * prop_cat_stats["std"]
-
-    flagged = prop_cat.merge(prop_cat_stats, on="Budget Category")
-    flagged = flagged[
-        (flagged["Invoice Amount"] > flagged["threshold"])
-        & (flagged["count"] >= 3)
-    ].copy()
-    flagged["Excess"] = flagged["Invoice Amount"] - flagged["mean"]
-
-    turn_info = p_turns[["Turn Key", "Unit Label", "Move-Out Date"]].drop_duplicates("Turn Key")
-    flagged = flagged.merge(turn_info, on="Turn Key", how="left")
-    flagged = flagged.sort_values("Excess", ascending=False)
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Outlier Flags", len(flagged))
-    c2.metric("Total Excess Spend", fmt(flagged["Excess"].sum()) if len(flagged) else "$0")
-    top_cat = flagged.groupby("Budget Category")["Excess"].sum().idxmax() if len(flagged) else "None"
-    c3.metric("Top Flagged Category", top_cat)
-
-    if len(flagged) > 0:
-        o_display = flagged[[
-            "Unit Label", "Move-Out Date", "Budget Category",
-            "Invoice Amount", "mean", "Excess"
-        ]].copy()
-        o_display["Move-Out Date"] = o_display["Move-Out Date"].dt.strftime("%b %d, %Y").fillna("—")
-        o_display["Invoice Amount"] = o_display["Invoice Amount"].apply(fmt)
-        o_display["mean"] = o_display["mean"].apply(fmt)
-        o_display["Excess"] = o_display["Excess"].apply(fmt)
-        o_display.columns = ["Unit", "Move-Out", "Category", "Actual",
-                              f"{prop} Avg", "Excess"]
-        st.dataframe(o_display, use_container_width=True, hide_index=True,
-                     height=min(400, 60 + len(flagged) * 35))
-    else:
-        st.success(f"No category outliers detected at {prop}.")
+        # Detail expanders — invoice-level deep dive
+        for _, t in last5.iterrows():
+            with st.expander(f"Detail — {t['Unit Label']} — {t['Move-Out']}"):
+                items = fp_lines[fp_lines["Turn Key"] == t["Turn Key"]].sort_values("Invoice Date")
+                d = items[["Vendor Name", "Budget Category", "Cost Type",
+                           "Invoice Amount", "Invoice Date", "Line Item Notes"]].copy()
+                d["Invoice Amount"] = d["Invoice Amount"].apply(lambda x: fmt(x, 2))
+                d["Invoice Date"] = d["Invoice Date"].dt.strftime("%b %d, %Y").fillna("—")
+                d["Line Item Notes"] = d["Line Item Notes"].fillna("")
+                st.dataframe(d, use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════
     # CLOSING NARRATIVE — PROPERTY SUMMARY
@@ -1013,7 +951,6 @@ if view == "3 — Property Summary":
     avg_cost = p_turns["total_cost"].mean()
     port_avg_all = ft_turns["total_cost"].mean()
     vs_port = ((avg_cost - port_avg_all) / port_avg_all * 100) if port_avg_all > 0 else 0
-    outlier_count = len(flagged)
 
     # Find this property's most expensive category
     prop_cat_totals = p_lines.groupby("Budget Category")["Invoice Amount"].sum()
@@ -1036,11 +973,6 @@ if view == "3 — Property Summary":
         insight_text += (
             f" Year-over-year costs {'increased' if prop_yoy > 0 else 'decreased'} <strong>{pct(prop_yoy)}</strong> "
             f"from 2024 to 2025{'— investigate what changed in scope or vendor pricing.' if prop_yoy > 15 else '.'}"
-        )
-    if outlier_count > 0:
-        insight_text += (
-            f" <strong>{outlier_count}</strong> outlier flags above — "
-            f"focus on the highest-excess items for immediate cost savings."
         )
     insight(insight_text)
 
@@ -1386,17 +1318,15 @@ elif view == "4 — Unit Search":
                 total_row_exp[str(int(y))] = hist_totals.get(y, 0)
             hist_export_df = pd.concat([hist_export_df, pd.DataFrame([total_row_exp])], ignore_index=True)
 
-            # Excel
+            # Excel — single sheet with header context
             hist_xl_buf = io.BytesIO()
             with pd.ExcelWriter(hist_xl_buf, engine="openpyxl") as writer:
-                summary_data = {
-                    "Property": [prop_choice], "Unit": [unit_choice],
-                    "Floor Plan": [unit_df.iloc[0]["Floor Plan"] if len(unit_df) > 0 else ""],
-                    "Categories Touched": [f"{cats_touched} / {total_cats}"],
-                    "Generated": [pd.Timestamp.now().strftime("%B %d, %Y")],
-                }
-                pd.DataFrame(summary_data).to_excel(writer, sheet_name="Summary", index=False)
-                hist_export_df.to_excel(writer, sheet_name="Work History", index=False)
+                hist_export_df.to_excel(writer, sheet_name="Work History", index=False, startrow=2)
+                ws = writer.sheets["Work History"]
+                fp_xl = unit_df.iloc[0]["Floor Plan"] if len(unit_df) > 0 else ""
+                ws.cell(row=1, column=1, value=f"{prop_choice}  |  Unit {unit_choice}  |  {fp_xl}  |  {cats_touched} of {total_cats} categories  |  {pd.Timestamp.now().strftime('%B %d, %Y')}")
+                from openpyxl.styles import Font
+                ws.cell(row=1, column=1).font = Font(bold=True, size=11)
             hist_xl_buf.seek(0)
             hist_xl_name = f"{prop_choice}_{unit_choice}_work_history_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx"
 
@@ -1423,10 +1353,13 @@ elif view == "4 — Unit Search":
                 hist_pdf.cell(yr_col_w, 7, ys, border=1, align="R")
             hist_pdf.ln()
 
-            # Table rows
+            # Table rows — skip categories with all-zero spend
             hist_pdf.set_font("Helvetica", "", 8)
             for _, r in hist_export_df.iterrows():
                 is_total = r["Category"] == "Total"
+                row_sum = sum(r.get(ys, 0) for ys in year_strs)
+                if not is_total and row_sum == 0:
+                    continue
                 if is_total:
                     hist_pdf.set_font("Helvetica", "B", 8)
                 hist_pdf.cell(cat_col_w, 6, _pdf(r["Category"]), border=1)
