@@ -14,6 +14,8 @@
 - **File:** `app.py` — single-file dashboard (~2,500 lines)
 - **Data:** `Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
+- **Live URL:** `https://unit-turns-dashboard-t2yhaxw6dfvmrqixmdxprz.streamlit.app/`
+- **Auth:** Password gate via `st.secrets["password"]` — set in Streamlit Cloud Settings → Secrets
 - **Stack:** Streamlit 1.54.0, Pandas 2.3.3, Plotly 6.5.2, OpenAI, Anthropic, Google GenAI
 
 ## Dashboard Structure (7 Tabs)
