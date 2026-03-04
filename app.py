@@ -2345,7 +2345,7 @@ elif view == "5 — Rent Roll":
         k1.metric("Total Units", f"{total_units}")
         k2.metric("Monthly Rent", fmt(total_rent))
         k3.metric("Loss to Lease", fmt(ltl), f"{ltl_pct * 100:.1f}%")
-        k4.metric("Full Turns", f"{n_ft}")
+        k4.metric("Renovated", f"{n_ft}", f"{n_ft / total_units * 100:.1f}%" if total_units else "-")
         k5.metric("Classic", f"{n_classic}", f"{n_classic / total_units * 100:.1f}%" if total_units else "-")
 
         # ── Build combined table with year columns ──
@@ -2506,12 +2506,7 @@ elif view == "6 — Data Health":
 
     health_df = pd.DataFrame(health_rows)
 
-    section("Data Source Status")
-    st.caption(f"Sources older than {_STALE_DAYS} days are flagged as stale  •  Target: update every 3 months")
-
-    st.dataframe(health_df, use_container_width=True, hide_index=True)
-
-    # Summary metrics
+    # Summary metrics — top of page for immediate visibility
     total_sources = len(health_rows)
     current = sum(1 for r in health_rows if "\u2705" in r["Status"])
     stale = sum(1 for r in health_rows if "\ud83d\udd34" in r["Status"])
@@ -2521,6 +2516,11 @@ elif view == "6 — Data Health":
     k1.metric("Total Sources", f"{total_sources}")
     k2.metric("Current", f"{current}")
     k3.metric("Stale / Missing", f"{stale + missing}", delta=f"-{stale + missing}" if (stale + missing) > 0 else None)
+
+    section("Data Source Status")
+    st.caption(f"Sources older than {_STALE_DAYS} days are flagged as stale  •  Target: update every 3 months")
+
+    st.dataframe(health_df, use_container_width=True, hide_index=True)
 
     footer()
 
