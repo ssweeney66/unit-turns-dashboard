@@ -21,6 +21,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Authentication gate ──
+def check_password():
+    """Return True if the user has entered the correct password."""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    if st.session_state.authenticated:
+        return True
+    pwd = st.text_input("Password", type="password", placeholder="Enter dashboard password")
+    if pwd:
+        if pwd == st.secrets.get("password", ""):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False
+
+if not check_password():
+    st.stop()
+
 YEARS = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 TREND_YEARS = [2021, 2022, 2023, 2024, 2025]
 CHART_TEMPLATE = "plotly_white"
