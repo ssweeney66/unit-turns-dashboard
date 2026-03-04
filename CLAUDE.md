@@ -24,7 +24,7 @@
 2. **Portfolio Overview** — Property x Year cost/volume matrices, Property x Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
 3. **Property Summary** — Single-property deep dive: volume, floor plans, expense group trend, category expenses, last 5 turns with floor plan comparison
 4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **Rent Roll** — Property-level rent roll with turn history columns (FT/MR/PT), portfolio Classic vs Full Turn summary table, unit-level detail with KPIs
+5. **Rent Roll** — Property-level rent roll with year-based turn history columns (2026–2021), portfolio Renovated vs Classic summary table with % columns, unit-level detail with KPIs
 6. **Data Health** — File timestamp monitoring with 90-day freshness threshold (green/red/missing signals)
 7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 
@@ -35,8 +35,8 @@
 - **Key columns:** Property Name, Building Code, Unit Number, Floor Plan, Move-Out Date, Turn Type, Vendor Name, Invoice Amount, Budget Category, Cost Type
 
 ### Rent Rolls (folder: `Rent Rolls/`)
-- **Active files (13):** Woodman, MontereyPark, Collins, 51Village, Lindley, ElRancho, Alta Vista, Roscoe, Woodbridge, Darby, Dickens, Fruitland, Garfield
-- **Pending files (2):** 12756Moorpark, 12800Moorpark — no matching property in turn data yet
+- **Active files (15):** Woodman, MontereyPark, Collins, 51Village, Lindley, ElRancho, Alta Vista, Roscoe, Woodbridge, Darby, Dickens, Fruitland, Garfield, 12756Moorpark, 12800Moorpark
+- **No turn data (2):** 12756 Moorpark (10 units), 12800 Moorpark (18 units) — all Classic, no matching property in turn data
 - **Missing:** Topanga — no rent roll file exists
 - **Format:** 8 metadata header rows (skip), header at row 8, 2 footer/summary rows to filter out
 - **Columns (5):** Unit, BD/BA, Market Rent, Rent, Move-in
@@ -59,6 +59,8 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - **Dickens:** "12-A" -> "12A" (hyphen removed by `_norm_unit`); "07 MGR" -> "7" (suffix stripped + leading zero)
 - **Fruitland:** "01" -> "1" (leading zero stripped); "09 MGR" -> "9" (suffix + leading zero)
 - **Garfield:** "616" -> "616", "616A" -> "616A", "618 1/2" -> "618 1/2" (kept as-is)
+- **12756 Moorpark:** "101" -> "101" (3-digit, no turn data — all Classic)
+- **12800 Moorpark:** "1" -> "1", "12A" -> "12A" (no turn data — all Classic)
 
 **Compound key (Building Code + Unit Number):**
 - **Monterey Park:** "505 Pomona, Unit A" -> "505 Pomona|A". Address normalization strips directional prefixes (W, S) and suffixes (Ave, Blvd, Dr). Spelling correction: rent roll "Hendricks" = turn data "Hendericks". Unit suffixes like "- ASST. MGR" or "- HUD" stripped to single letter.
@@ -73,7 +75,7 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - **Turn Abbreviations:** FT (Full Turn), MR (Make Ready), PT (Partial Turn)
 - **17 Budget Categories:** Core Labor (7), Core Materials (4), Other (6)
 - **Cost Types:** Materials, Labor, Mixed, Fee
-- **14 Properties:** Monterey Park, Woodman, Collins, Lindley, El Rancho, 51 at the Village, Alta Vista, Roscoe, Topanga, Darby, Fruitland, Dickens, Garfield, Woodbridge
+- **16 Properties:** Monterey Park, Woodman, Collins, Lindley, El Rancho, 51 at the Village, Alta Vista, Roscoe, Topanga, Darby, Fruitland, Dickens, Garfield, Woodbridge, 12756 Moorpark, 12800 Moorpark
 - **Classic unit:** A unit on the rent roll with no Full Turn on record in turn data
 
 ## Key Functions (Rent Roll Tab)
@@ -82,7 +84,7 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - `_norm_unit(u)` — normalizes a unit ID: strips suffixes (HUD/MGR/BC/ASST. MGR), removes formatting hyphens ("12-A" → "12A"), normalizes leading zeros
 - `_normalize_mp_bldg(addr)` — normalizes Monterey Park building addresses to match turn data
 - `rr_to_turn_key(prop_name, rr_unit_str)` — maps a rent roll unit to the compound key used in turn data
-- `build_turn_history(prop_name, _df_all)` — returns dict of compound_key -> list of turn strings ("FT 2025 - $26,000")
+- `build_turn_history(prop_name, _df_all)` — returns dict of compound_key -> dict of year -> turn string ("FT - $26,000")
 - `get_ft_units(prop_name, _df_all)` — returns set of compound keys for units with at least one Full Turn
 
 ## Coding Standards

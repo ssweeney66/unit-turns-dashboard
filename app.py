@@ -700,6 +700,7 @@ PROPERTY_ORDER = [
     "Monterey Park", "Woodman", "Collins", "Lindley", "El Rancho",
     "51 at the Village", "Alta Vista", "Roscoe", "Topanga", "Darby",
     "Fruitland", "Dickens", "Garfield", "Woodbridge",
+    "12756 Moorpark", "12800 Moorpark",
 ]
 _all_props = set(ft_turns["Property Name"].unique())
 PROPERTIES = [p for p in PROPERTY_ORDER if p in _all_props] + sorted(_all_props - set(PROPERTY_ORDER))
@@ -2139,6 +2140,8 @@ elif view == "5 — Rent Roll":
         "Dickens": "Rent Roll - Dickens.xlsx",
         "Fruitland": "Rent Roll - Fruitland.xlsx",
         "Garfield": "Rent Roll - Garfield.xlsx",
+        "12756 Moorpark": "Rent Roll - 12756Moorpark.xlsx",
+        "12800 Moorpark": "Rent Roll - 12800Moorpark.xlsx",
     }
 
     # ── Load rent roll ──
@@ -2236,9 +2239,8 @@ elif view == "5 — Rent Roll":
 
     @st.cache_data
     def build_turn_history(prop_name, _df_all):
-        """Return a dict: compound_key → list of 'FT 2025 - $26,000' strings (most recent first).
-        Compound key is 'BuildingCode|UnitNumber' for properties with building codes,
-        or just 'UnitNumber' for direct-match properties."""
+        """Return a dict: compound_key → dict of year → 'FT - $26,000' string.
+        If multiple turns in the same year, entries are joined with ' / '."""
         prop_lines = _df_all[_df_all["Property Name"] == prop_name].copy()
         prop_lines["Move-Out Date"] = pd.to_datetime(prop_lines["Move-Out Date"], errors="coerce")
         # Build compound key from turn data (normalize unit numbers for consistent matching)
@@ -2254,13 +2256,16 @@ elif view == "5 — Rent Roll":
 
         history = {}
         for key, grp in turns.groupby("_key"):
-            entries = []
+            year_data = {}
             for _, r in grp.iterrows():
                 abbr = TURN_ABBR.get(r["Turn Type"], "??")
                 yr = r["Move-Out Date"].year
-                cost = r["Total_Cost"]
-                entries.append(f"{abbr} {yr} - {fmt(cost)}")
-            history[key] = entries
+                entry = f"{abbr} - {fmt(r['Total_Cost'])}"
+                if yr in year_data:
+                    year_data[yr] += f" / {entry}"
+                else:
+                    year_data[yr] = entry
+            history[key] = year_data
         return history
 
     @st.cache_data
@@ -2293,26 +2298,38 @@ elif view == "5 — Rent Roll":
             n_units = len(rr_units)
             n_ft = len(rr_mapped & ft_keys)
             n_classic = n_units - n_ft
+            ren_pct = f"{n_ft / n_units * 100:.1f}%" if n_units else "-"
             classic_pct = f"{n_classic / n_units * 100:.1f}%" if n_units else "-"
             summary_rows.append({
                 "Property": prop,
                 "Units": n_units,
-                "Full Turns": n_ft,
+                "Renovated": n_ft,
                 "Classic": n_classic,
-                "Classic %": classic_pct,
+                "% Renovated": ren_pct,
+                "% Classic": classic_pct,
             })
         else:
             # Placeholder — no rent roll yet
             summary_rows.append({
                 "Property": prop,
                 "Units": "-",
-                "Full Turns": "-",
+                "Renovated": "-",
                 "Classic": "-",
-                "Classic %": "-",
+                "% Renovated": "-",
+                "% Classic": "-",
             })
 
     summary_df = pd.DataFrame(summary_rows)
-    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+    def _highlight_pct_cols(col):
+        if col.name in ("% Renovated", "% Classic"):
+            return ["background-color: #f0f4f8"] * len(col)
+        return [""] * len(col)
+
+    st.dataframe(
+        summary_df.style.apply(_highlight_pct_cols),
+        use_container_width=True, hide_index=True,
+    )
 
     st.markdown("---")
 
@@ -2345,8 +2362,8 @@ elif view == "5 — Rent Roll":
         k4.metric("Full Turns", f"{n_ft}")
         k5.metric("Classic", f"{n_classic}", f"{n_classic / total_units * 100:.1f}%" if total_units else "-")
 
-        # ── Build combined table ──
-        max_turns = max((len(v) for v in turn_hist.values()), default=0)
+        # ── Build combined table with year columns ──
+        _YEAR_COLS = [2026, 2025, 2024, 2023, 2022, 2021]
 
         display_rows = []
         for _, row in rr.iterrows():
@@ -2359,15 +2376,15 @@ elif view == "5 — Rent Roll":
                 "Move-in": row["Move-in"].strftime("%b %Y") if pd.notna(row["Move-in"]) else "",
             }
             mapped_key = rr_to_turn_key(prop_choice, unit_key)
-            entries = turn_hist.get(mapped_key, [])
-            for i in range(max_turns):
-                r[f"Turn {i + 1}"] = entries[i] if i < len(entries) else ""
+            year_data = turn_hist.get(mapped_key, {})
+            for yr in _YEAR_COLS:
+                r[str(yr)] = year_data.get(yr, "")
             display_rows.append(r)
 
         display_df = pd.DataFrame(display_rows)
 
         section(f"Rent Roll — {prop_choice}")
-        st.caption(f"{total_units} units  •  {n_ft} full turns  •  {n_classic} classic  •  Turn history (most recent → oldest)")
+        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic")
 
         st.dataframe(display_df, use_container_width=True, hide_index=True, height=700)
 
@@ -2420,6 +2437,8 @@ elif view == "6 — Data Health":
         "Rent Roll — Dickens": "Rent Roll - Dickens.xlsx",
         "Rent Roll — Fruitland": "Rent Roll - Fruitland.xlsx",
         "Rent Roll — Garfield": "Rent Roll - Garfield.xlsx",
+        "Rent Roll — 12756 Moorpark": "Rent Roll - 12756Moorpark.xlsx",
+        "Rent Roll — 12800 Moorpark": "Rent Roll - 12800Moorpark.xlsx",
     }
     for label, fname in rr_files.items():
         health_rows.append(file_health(_RR_DIR_H / fname, label))
