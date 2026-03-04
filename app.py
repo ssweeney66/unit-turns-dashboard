@@ -97,7 +97,10 @@ st.markdown("""
         letter-spacing: 0.5px; color: #475569 !important;
         text-align: left !important;
     }
-    .stDataFrame td { font-size: 13px !important; text-align: left !important; }
+    .stDataFrame td {
+        font-size: 13px !important; text-align: left !important;
+        font-variant-numeric: tabular-nums;
+    }
 
     /* Headers */
     .page-banner {
@@ -138,6 +141,19 @@ st.markdown("""
         margin-top: 60px; padding: 20px 0; border-top: 1px solid #e2e8f0;
         text-align: center; font-size: 11px; color: #94a3b8; letter-spacing: 0.3px;
     }
+
+    /* Summary totals bar */
+    .totals-bar {
+        background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+        padding: 12px 20px; margin: 8px 0; display: flex; justify-content: space-between;
+        font-size: 14px;
+    }
+    .totals-bar .totals-label {
+        color: #64748b; text-transform: uppercase; font-size: 11px;
+        letter-spacing: 0.5px; font-weight: 600;
+    }
+    .totals-bar .totals-value { color: #0f172a; font-size: 18px; font-weight: 700; }
+    .totals-bar .totals-value-accent { color: #dc2626; font-size: 18px; font-weight: 700; }
 
     /* Sidebar active view accent */
     [data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"] {
@@ -562,7 +578,7 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
     if year_labels is None:
         year_labels = EXPENSE_YEAR_LABELS
 
-    st.markdown(f"**{title}**")
+    st.markdown(f'<p style="font-size:14px; font-weight:600; color:#1e293b; margin:16px 0 8px 0;">{title}</p>', unsafe_allow_html=True)
     subset = data[data["Budget Category"].isin(categories)]
     if len(subset) == 0:
         st.info(f"No data for {title.split(' (')[0]} categories.")
@@ -754,8 +770,8 @@ if view == "3 — Property Summary":
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Full Turns", f"{len(p_turns):,}")
     c2.metric("Total Spend", fmt(p_turns["total_cost"].sum()))
-    c3.metric("Avg Cost", fmt(p_turns["total_cost"].mean()))
-    c4.metric("Median Cost", fmt(p_turns["total_cost"].median()))
+    c3.metric("Avg Cost per Turn", fmt(p_turns["total_cost"].mean()))
+    c4.metric("Median Cost per Turn", fmt(p_turns["total_cost"].median()))
     dur = p_turns["Duration"].dropna()
     c5.metric("Median Duration", f"{dur.median():.0f} days" if len(dur) else "—")
 
@@ -1015,7 +1031,7 @@ elif view == "2 — Portfolio Overview":
     c1.metric("Full Turns (2016–25)", f"{len(recent):,}")
     c2.metric("Total Spend", fmt(recent["total_cost"].sum()))
     c3.metric("Portfolio Avg Cost", fmt(recent["total_cost"].mean()))
-    c4.metric("Properties Active", f"{recent['Property ID'].nunique()}")
+    c4.metric("Active Properties", f"{recent['Property ID'].nunique()}")
 
     section("Average Full Turn Cost by Property & Year")
 
@@ -1074,6 +1090,9 @@ elif view == "2 — Portfolio Overview":
             display.style.set_properties(
                 subset=["Avg (5-Yr)"],
                 **{"background-color": "#eff6ff", "font-weight": "700", "color": "#1e40af"},
+            ).set_properties(
+                subset=pd.IndexSlice["PORTFOLIO AVG", :],
+                **{"background-color": "#f1f5f9", "font-weight": "700", "border-top": "2px solid #cbd5e1"},
             ),
             use_container_width=True,
             height=560,
@@ -1115,7 +1134,13 @@ elif view == "2 — Portfolio Overview":
         count_matrix = count_matrix.loc[sorted(count_matrix.index, key=lambda n: _PROP_RANK.get(n, 999))]
         count_matrix.loc["PORTFOLIO TOTAL"] = count_matrix.sum()
         count_matrix = count_matrix.astype(int)
-        st.dataframe(count_matrix, use_container_width=True, height=560)
+        st.dataframe(
+            count_matrix.style.set_properties(
+                subset=pd.IndexSlice["PORTFOLIO TOTAL", :],
+                **{"background-color": "#f1f5f9", "font-weight": "700", "border-top": "2px solid #cbd5e1"},
+            ),
+            use_container_width=True, height=560,
+        )
 
         # Volume insight — actionable
         vol_total = int(count_matrix.loc["PORTFOLIO TOTAL", "Total"])
@@ -1174,6 +1199,9 @@ elif view == "2 — Portfolio Overview":
         fp_display.style.set_properties(
             subset=["Property Avg"],
             **{"background-color": "#eff6ff", "font-weight": "700", "color": "#1e40af"},
+        ).set_properties(
+            subset=pd.IndexSlice["PORTFOLIO AVG", :],
+            **{"background-color": "#f1f5f9", "font-weight": "700", "border-top": "2px solid #cbd5e1"},
         ),
         use_container_width=True,
         height=560,
@@ -1247,10 +1275,10 @@ elif view == "4 — Unit Search":
         bed = f"{sample['Bedrooms']:.0f}" if pd.notna(sample['Bedrooms']) else "—"
         bath = f"{sample['Bathrooms']:.0f}" if pd.notna(sample['Bathrooms']) else "—"
         st.markdown(
-            f"**{prop_choice} — Unit {unit_choice}** &nbsp;|&nbsp; "
-            f"Floor Plan: `{sample['Floor Plan']}` &nbsp;|&nbsp; "
-            f"Bed/Bath: `{bed} / {bath}` &nbsp;|&nbsp; "
-            f"ID: `{sample['UID']}`"
+            f"**{prop_choice} — Unit {unit_choice}** &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Floor Plan: **{sample['Floor Plan']}** &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Bed/Bath: **{bed} / {bath}** &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"ID: {sample['UID']}"
         )
 
         most_recent = unit_ts.iloc[0]
@@ -1260,7 +1288,7 @@ elif view == "4 — Unit Search":
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Turns", len(unit_ts))
         c2.metric("Lifetime Spend", fmt(unit_ts["total_cost"].sum()))
-        c3.metric("Avg Cost / Turn", fmt(unit_ts["total_cost"].mean()))
+        c3.metric("Avg Cost per Turn", fmt(unit_ts["total_cost"].mean()))
         c4.metric("Most Recent", f"{most_recent_type} ({most_recent_date.strftime('%b %Y') if pd.notna(most_recent_date) else '—'})")
 
         section("Turn History")
@@ -1760,7 +1788,7 @@ elif view == "1 — Executive Summary":
     c3.metric("Portfolio Avg (All)", fmt(portfolio_avg))
     c4.metric("2025 Total Spend", fmt(curr_year["total_cost"].sum()))
     c5.metric("Median Duration", f"{dur_now:.0f} days" if pd.notna(dur_now) else "—",
-              f"{dur_now - dur_then:+.0f} days vs '24" if (pd.notna(dur_now) and pd.notna(dur_then)) else "")
+              f"{dur_now - dur_then:+.0f} days vs '24" if (pd.notna(dur_now) and pd.notna(dur_then)) else None)
     c6.metric("Active Properties", f"{curr_year['Property ID'].nunique()}" if len(curr_year) else "0")
 
     # ━━ Section 1: Cost Trajectory ━━
@@ -1790,7 +1818,7 @@ elif view == "1 — Executive Summary":
         ))
         fig_traj.update_layout(
             template=CHART_TEMPLATE,
-            xaxis=dict(dtick=1, title=""), yaxis=dict(title="Cost per Full Turn ($)"),
+            xaxis=dict(dtick=1, title=""), yaxis=dict(title="Avg Cost per Turn ($)"),
             legend=dict(orientation="h", y=-0.12), margin=dict(t=10, b=50), height=380,
             hovermode="x unified",
         )
@@ -1805,7 +1833,7 @@ elif view == "1 — Executive Summary":
         ys_display["total_spend"] = ys_display["total_spend"].apply(fmt)
         ys_display["YoY Change"] = ys_display["YoY Change"].apply(lambda x: pct(x) if pd.notna(x) else "—")
         ys_display["Year"] = ys_display["Year"].astype(int).astype(str)
-        ys_display.columns = ["Year", "Turns", "Avg Cost", "Median", "Total Spend", "YoY Δ"]
+        ys_display.columns = ["Year", "Turns", "Avg Cost", "Median", "Total Spend", "vs Prior Yr"]
         st.dataframe(ys_display, use_container_width=True, hide_index=True, height=380)
 
     # Cost efficiency narrative
@@ -1861,7 +1889,7 @@ elif view == "1 — Executive Summary":
                             annotation_position="top right", annotation_font_size=11)
         fig_bench.update_layout(
             margin=dict(t=20, b=10, l=10, r=100), height=480,
-            xaxis_title="Avg Full Turn Cost ($)", yaxis_title="",
+            xaxis_title="Avg Cost per Turn ($)", yaxis_title="",
             coloraxis_showscale=False,
         )
         st.plotly_chart(fig_bench, use_container_width=True)
@@ -1871,7 +1899,7 @@ elif view == "1 — Executive Summary":
         pb_display["avg_cost"] = pb_display["avg_cost"].apply(fmt)
         pb_display["vs Portfolio"] = pb_display["vs Portfolio"].apply(lambda x: pct(x))
         pb_display["med_duration"] = pb_display["med_duration"].apply(lambda x: f"{x:.0f} days" if pd.notna(x) else "—")
-        pb_display.columns = ["#", "Property", "Turns", "Avg Cost", "vs Portfolio", "Med Duration"]
+        pb_display.columns = ["Rank", "Property", "Turns", "Avg Cost", "vs Portfolio", "Median Duration"]
         st.dataframe(pb_display, use_container_width=True, hide_index=True, height=480)
 
     # Identify best and worst performers with actionable gap analysis
@@ -1977,10 +2005,10 @@ elif view == "1 — Executive Summary":
         forecast_spend = projected_vol_2026 * projected_cost_2026
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("3-Year Avg Turns/Year", f"{avg_turns:.0f}")
-        c2.metric("3-Year Avg Cost", fmt(avg_cost_trend))
-        c3.metric("2026 Proj. Avg Cost", fmt(projected_cost_2026))
-        c4.metric("2026 Proj. Spend", fmt(forecast_spend))
+        c1.metric("3-Year Avg Turns", f"{avg_turns:.0f}/yr")
+        c2.metric("3-Year Avg Cost per Turn", fmt(avg_cost_trend))
+        c3.metric("2026 Projected Cost", fmt(projected_cost_2026))
+        c4.metric("2026 Projected Spend", fmt(forecast_spend))
 
         # Forecast chart
         all_years_data = ft_turns[ft_turns["Year"].isin(YEARS)].groupby("Year").agg(
@@ -2108,7 +2136,7 @@ elif view == "1 — Executive Summary":
 # VIEW 5: RENT ROLL
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 elif view == "5 — Rent Roll":
-    banner("Rent Roll", "Current occupancy with historical turn activity")
+    banner("Rent Roll", "Renovation status, loss-to-lease analysis, and full turn ROI by unit")
 
     # ── Rent roll file registry ──
     _RR_DIR = Path(__file__).parent / "Rent Rolls"
@@ -2291,8 +2319,8 @@ elif view == "5 — Rent Roll":
             n_units = len(rr_units)
             n_ft = len(rr_mapped & ft_keys)
             n_classic = n_units - n_ft
-            ren_pct = f"{n_ft / n_units * 100:.1f}%" if n_units else "-"
-            classic_pct = f"{n_classic / n_units * 100:.1f}%" if n_units else "-"
+            ren_pct = f"{n_ft / n_units * 100:.1f}%" if n_units else "—"
+            classic_pct = f"{n_classic / n_units * 100:.1f}%" if n_units else "—"
             summary_rows.append({
                 "Property": prop,
                 "Units": n_units,
@@ -2305,11 +2333,11 @@ elif view == "5 — Rent Roll":
             # Placeholder — no rent roll yet
             summary_rows.append({
                 "Property": prop,
-                "Units": "-",
-                "Renovated": "-",
-                "Classic": "-",
-                "% Renovated": "-",
-                "% Classic": "-",
+                "Units": "—",
+                "Renovated": "—",
+                "Classic": "—",
+                "% Renovated": "—",
+                "% Classic": "—",
             })
 
     summary_df = pd.DataFrame(summary_rows)
@@ -2353,8 +2381,8 @@ elif view == "5 — Rent Roll":
         k1.metric("Total Units", f"{total_units}")
         k2.metric("Monthly Rent", fmt(total_rent))
         k3.metric("Loss to Lease", fmt(ltl), f"{ltl_pct * 100:.1f}%")
-        k4.metric("Renovated", f"{n_ft}", f"{n_ft / total_units * 100:.1f}%" if total_units else "-")
-        k5.metric("Classic", f"{n_classic}", f"{n_classic / total_units * 100:.1f}%" if total_units else "-")
+        k4.metric("Renovated", f"{n_ft}", f"{n_ft / total_units * 100:.1f}%" if total_units else "—")
+        k5.metric("Classic", f"{n_classic}", f"{n_classic / total_units * 100:.1f}%" if total_units else "—")
 
         # ── Floor Plan Summary ──
         section(f"Floor Plan Summary — {prop_choice}")
@@ -2394,7 +2422,7 @@ elif view == "5 — Rent Roll":
 
         # ── Unit Detail — Renovation Analysis ──
         section(f"Rent Roll — {prop_choice}")
-        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic  •  FT budget = trailing 3-year avg by floor plan (falls back to property avg: {fmt(avg_ft_cost)})")
+        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic  •  FT Budget based on trailing 3-year avg per floor plan")
 
         display_rows = []
         for _, row in rr.iterrows():
@@ -2443,10 +2471,17 @@ elif view == "5 — Rent Roll":
         )
 
         # ── Totals ──
-        tc1, tc2, tc3 = st.columns(3)
-        tc1.markdown(f"**Total Market Rent:** {fmt(total_market)}")
-        tc2.markdown(f"**Total Rent:** {fmt(total_rent)}")
-        tc3.markdown(f"**Total Loss to Lease:** {fmt(ltl)}")
+        st.markdown(
+            f'<div class="totals-bar">'
+            f'<span><span class="totals-label">Total Market Rent</span>'
+            f'<br><span class="totals-value">{fmt(total_market)}</span></span>'
+            f'<span><span class="totals-label">Total Rent</span>'
+            f'<br><span class="totals-value">{fmt(total_rent)}</span></span>'
+            f'<span><span class="totals-label">Total Loss to Lease</span>'
+            f'<br><span class="totals-value-accent">{fmt(ltl)}</span></span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 
@@ -2520,7 +2555,7 @@ elif view == "6 — Data Health":
     def file_health(path, label):
         """Return dict with file label, last modified, age in days, and health status."""
         if not path.exists():
-            return {"Source": label, "File": path.name, "Last Updated": "Not found", "Age": "-", "Status": "\u274c Missing"}
+            return {"Source": label, "File": path.name, "Last Updated": "Not found", "Age": "—", "Status": "\u274c Missing"}
         mtime = datetime.fromtimestamp(os.path.getmtime(path))
         age_days = (datetime.now() - mtime).days
         status = "\u2705 Current" if age_days <= _STALE_DAYS else "\ud83d\udd34 Stale"
@@ -2576,12 +2611,19 @@ elif view == "6 — Data Health":
     k1, k2, k3 = st.columns(3)
     k1.metric("Total Sources", f"{total_sources}")
     k2.metric("Current", f"{current}")
-    k3.metric("Stale / Missing", f"{stale + missing}", delta=f"-{stale + missing}" if (stale + missing) > 0 else None)
+    k3.metric("Stale / Missing", f"{stale + missing}", delta=f"action needed" if (stale + missing) > 0 else None, delta_color="inverse")
 
     section("Data Source Status")
     st.caption(f"Sources older than {_STALE_DAYS} days are flagged as stale  •  Target: update every 3 months")
 
-    st.dataframe(health_df, use_container_width=True, hide_index=True)
+    def _health_row_style(row):
+        if "\u274c" in str(row["Status"]):
+            return ["background-color: #fef2f2"] * len(row)
+        if "\ud83d\udd34" in str(row["Status"]):
+            return ["background-color: #fffbeb"] * len(row)
+        return [""] * len(row)
+
+    st.dataframe(health_df.style.apply(_health_row_style, axis=1), use_container_width=True, hide_index=True)
 
     footer()
 
