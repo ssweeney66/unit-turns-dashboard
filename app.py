@@ -2192,7 +2192,7 @@ elif view == "5 — Rent Roll":
             n_units = len(rr_units)
             n_ft = len(rr_units & ft_units)
             n_classic = n_units - n_ft
-            classic_pct = pct(n_classic / n_units) if n_units else "-"
+            classic_pct = f"{n_classic / n_units * 100:.1f}%" if n_units else "-"
             summary_rows.append({
                 "Property": prop,
                 "Units": n_units,
@@ -2239,9 +2239,9 @@ elif view == "5 — Rent Roll":
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Total Units", f"{total_units}")
         k2.metric("Monthly Rent", fmt(total_rent))
-        k3.metric("Loss to Lease", fmt(ltl), pct(ltl_pct))
+        k3.metric("Loss to Lease", fmt(ltl), f"{ltl_pct * 100:.1f}%")
         k4.metric("Full Turns", f"{n_ft}")
-        k5.metric("Classic", f"{n_classic}", pct(n_classic / total_units) if total_units else "-")
+        k5.metric("Classic", f"{n_classic}", f"{n_classic / total_units * 100:.1f}%" if total_units else "-")
 
         # ── Build combined table ──
         max_turns = max((len(v) for v in turn_hist.values()), default=0)
