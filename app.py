@@ -239,6 +239,10 @@ def pct(val):
 def expense_year_label(yr):
     return "2026 YTD" if yr == 2026 else str(yr)
 
+def _pdf(s):
+    """Sanitize text for FPDF's default latin-1 font (replace em/en dashes)."""
+    return str(s).replace("\u2014", "-").replace("\u2013", "-")
+
 EXPENSE_YEAR_LABELS = [expense_year_label(y) for y in EXPENSE_YEARS]
 
 def footer():
@@ -1401,10 +1405,10 @@ elif view == "4 — Unit Search":
             hist_pdf.set_auto_page_break(auto=True, margin=15)
             hist_pdf.add_page()
             hist_pdf.set_font("Helvetica", "B", 14)
-            hist_pdf.cell(0, 10, f"Unit Work History — {prop_choice} — Unit {unit_choice}", ln=True)
+            hist_pdf.cell(0, 10, _pdf(f"Unit Work History - {prop_choice} - Unit {unit_choice}"), ln=True)
             hist_pdf.set_font("Helvetica", "", 9)
             fp_label_pdf = unit_df.iloc[0]["Floor Plan"] if len(unit_df) > 0 else ""
-            hist_pdf.cell(0, 6, f"Floor Plan: {fp_label_pdf}  |  {cats_touched} of {total_cats} categories touched  |  Generated {pd.Timestamp.now().strftime('%B %d, %Y')}", ln=True)
+            hist_pdf.cell(0, 6, _pdf(f"Floor Plan: {fp_label_pdf}  |  {cats_touched} of {total_cats} categories touched  |  Generated {pd.Timestamp.now().strftime('%B %d, %Y')}"), ln=True)
             hist_pdf.ln(4)
 
             # Table header
@@ -1425,11 +1429,11 @@ elif view == "4 — Unit Search":
                 is_total = r["Category"] == "Total"
                 if is_total:
                     hist_pdf.set_font("Helvetica", "B", 8)
-                hist_pdf.cell(cat_col_w, 6, str(r["Category"]), border=1)
-                hist_pdf.cell(grp_col_w, 6, str(r["Group"]), border=1)
+                hist_pdf.cell(cat_col_w, 6, _pdf(r["Category"]), border=1)
+                hist_pdf.cell(grp_col_w, 6, _pdf(r["Group"]), border=1)
                 for ys in year_strs:
                     val = r.get(ys, 0)
-                    hist_pdf.cell(yr_col_w, 6, fmt(val) if val != 0 else "—", border=1, align="R")
+                    hist_pdf.cell(yr_col_w, 6, _pdf(fmt(val)) if val != 0 else "-", border=1, align="R")
                 hist_pdf.ln()
                 if is_total:
                     hist_pdf.set_font("Helvetica", "", 8)
@@ -1655,10 +1659,10 @@ elif view == "4 — Unit Search":
             pdf = FPDF(orientation="L", unit="mm", format="A4")
             pdf.add_page()
             pdf.set_font("Helvetica", "B", 14)
-            pdf.cell(0, 10, f"Recommended Scope - {proj_type}", new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 10, _pdf(f"Recommended Scope - {proj_type}"), new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("Helvetica", "", 10)
-            pdf.cell(0, 6, f"{prop_choice}  |  Unit {unit_choice}  |  {unit_floor_plan}  |  Generated {today_str}", new_x="LMARGIN", new_y="NEXT")
-            pdf.cell(0, 6, f"Based on {comp_desc}", new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 6, _pdf(f"{prop_choice}  |  Unit {unit_choice}  |  {unit_floor_plan}  |  Generated {today_str}"), new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 6, _pdf(f"Based on {comp_desc}"), new_x="LMARGIN", new_y="NEXT")
             pdf.ln(4)
             # Table header
             pdf.set_font("Helvetica", "B", 9)
@@ -1672,15 +1676,15 @@ elif view == "4 — Unit Search":
             pdf.set_font("Helvetica", "", 9)
             for _, r in scope_export_df.iterrows():
                 if r["Projected Cost"] > 0 or r["Status"] != "Not Expected":
-                    pdf.cell(90, 6, r["Category"], border=1)
-                    pdf.cell(45, 6, r["Group"], border=1)
-                    pdf.cell(40, 6, fmt(r["Projected Cost"]), border=1, align="R")
-                    pdf.cell(50, 6, r["Status"], border=1)
+                    pdf.cell(90, 6, _pdf(r["Category"]), border=1)
+                    pdf.cell(45, 6, _pdf(r["Group"]), border=1)
+                    pdf.cell(40, 6, _pdf(fmt(r["Projected Cost"])), border=1, align="R")
+                    pdf.cell(50, 6, _pdf(r["Status"]), border=1)
                     pdf.ln()
             # Total row
             pdf.set_font("Helvetica", "B", 9)
             pdf.cell(135, 7, "PROJECTED TOTAL", border=1, fill=True)
-            pdf.cell(40, 7, fmt(adjusted_total), border=1, fill=True, align="R")
+            pdf.cell(40, 7, _pdf(fmt(adjusted_total)), border=1, fill=True, align="R")
             pdf.cell(50, 7, "", border=1, fill=True)
             pdf.ln()
 
