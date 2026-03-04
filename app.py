@@ -2134,8 +2134,7 @@ elif view == "5 — Rent Roll":
         rr = rr[~rr["Unit"].astype(str).str.contains("LLC|Properties", na=False)]
         rr["Market Rent"] = pd.to_numeric(rr["Market Rent"], errors="coerce")
         rr["Rent"] = pd.to_numeric(rr["Rent"], errors="coerce")
-        rr["Lease From"] = pd.to_datetime(rr["Lease From"], errors="coerce")
-        rr["Lease To"] = pd.to_datetime(rr["Lease To"], errors="coerce")
+        rr["Move-in"] = pd.to_datetime(rr["Move-in"], errors="coerce")
         return rr
 
     # ── Build turn history columns for a property ──
@@ -2173,21 +2172,17 @@ elif view == "5 — Rent Roll":
 
         # ── KPIs ──
         total_units = len(rr)
-        occupied = (rr["Status"] == "Current").sum()
-        vacant = total_units - occupied
-        occ_rate = occupied / total_units if total_units else 0
         total_market = rr["Market Rent"].sum()
         total_rent = rr["Rent"].sum()
         ltl = total_market - total_rent
         ltl_pct = ltl / total_market if total_market else 0
         units_with_turns = sum(1 for u in rr["Unit"].astype(str).str.strip() if u in turn_hist)
 
-        k1, k2, k3, k4, k5 = st.columns(5)
+        k1, k2, k3, k4 = st.columns(4)
         k1.metric("Total Units", f"{total_units}")
-        k2.metric("Occupancy", pct(occ_rate), f"{vacant} vacant")
-        k3.metric("Monthly Rent", fmt(total_rent))
-        k4.metric("Loss to Lease", fmt(ltl), pct(ltl_pct))
-        k5.metric("Units w/ Turn History", f"{units_with_turns} of {total_units}")
+        k2.metric("Monthly Rent", fmt(total_rent))
+        k3.metric("Loss to Lease", fmt(ltl), pct(ltl_pct))
+        k4.metric("Units w/ Turn History", f"{units_with_turns} of {total_units}")
 
         # ── Build combined table ──
         # Determine max turn columns needed
@@ -2199,11 +2194,9 @@ elif view == "5 — Rent Roll":
             r = {
                 "Unit": unit_key,
                 "BD/BA": row["BD/BA"],
-                "Status": row["Status"],
                 "Market Rent": fmt(row["Market Rent"]) if pd.notna(row["Market Rent"]) else "",
                 "Rent": fmt(row["Rent"]) if pd.notna(row["Rent"]) else "",
-                "Lease From": row["Lease From"].strftime("%b %Y") if pd.notna(row["Lease From"]) else "",
-                "Lease To": row["Lease To"].strftime("%b %Y") if pd.notna(row["Lease To"]) else "",
+                "Move-in": row["Move-in"].strftime("%b %Y") if pd.notna(row["Move-in"]) else "",
             }
             # Turn history columns
             entries = turn_hist.get(unit_key, [])
@@ -2216,7 +2209,7 @@ elif view == "5 — Rent Roll":
         display_df = pd.DataFrame(display_rows)
 
         section("Rent Roll — Woodman")
-        st.caption(f"{total_units} units  •  {occupied} occupied  •  {vacant} vacant  •  Turn history from invoice data (most recent → oldest)")
+        st.caption(f"{total_units} units  •  Turn history from invoice data (most recent → oldest)")
 
         st.dataframe(display_df, use_container_width=True, hide_index=True, height=700)
 

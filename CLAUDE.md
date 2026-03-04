@@ -35,9 +35,9 @@
 - **Key columns:** Property Name, Building Code, Unit Number, Floor Plan, Move-Out Date, Turn Type, Vendor Name, Invoice Amount, Budget Category, Cost Type
 
 ### Rent Rolls (folder: `Rent Rolls/`)
-- **Files:** `Rent Roll - Woodman.xlsx`, `Rent Roll - Monterey Park.xlsx`, `Rent Roll - Collins.xlsx`
+- **Files:** `Rent Roll - Woodman.xlsx`, `Rent Roll - MontereyPark.xlsx`, `Rent Roll - Collins.xlsx`
 - **Format:** 8 metadata header rows (skip), header at row 8, 2 footer/summary rows to filter out
-- **Columns (7):** Unit, BD/BA, Status, Market Rent, Rent, Lease From, Lease To
+- **Columns (5):** Unit, BD/BA, Market Rent, Rent, Move-in
 - **Cleanup:** `header=8`, drop all-NaN rows, filter out rows where Unit contains "Units" or "Total", filter out property address rows
 - **Collins quirk:** Has an extra property address row after the header that must be filtered (contains "COLLINS, LLC")
 
