@@ -2386,7 +2386,15 @@ elif view == "5 — Rent Roll":
         section(f"Rent Roll — {prop_choice}")
         st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic")
 
-        st.dataframe(display_df, use_container_width=True, hide_index=True, height=700)
+        def _highlight_year_cols(col):
+            if col.name in [str(y) for y in _YEAR_COLS]:
+                return ["background-color: #f0f4f8"] * len(col)
+            return [""] * len(col)
+
+        st.dataframe(
+            display_df.style.apply(_highlight_year_cols),
+            use_container_width=True, hide_index=True, height=700,
+        )
 
     footer()
 
