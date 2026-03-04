@@ -2164,9 +2164,10 @@ elif view == "5 — Rent Roll":
         return history
 
     # ── Woodman test ──
-    rr_path = Path("Rent Rolls/Rent Roll - Woodman.xlsx")
+    _APP_DIR = Path(__file__).parent
+    rr_path = _APP_DIR / "Rent Rolls" / "Rent Roll - Woodman.xlsx"
     if not rr_path.exists():
-        st.error("Rent Roll file not found: Rent Rolls/Rent Roll - Woodman.xlsx")
+        st.error(f"Rent Roll file not found: {rr_path}")
     else:
         rr = load_rent_roll(rr_path)
         turn_hist = build_turn_history("Woodman", _df_all)
