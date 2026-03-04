@@ -95,8 +95,9 @@ st.markdown("""
         background: #f1f5f9 !important; font-weight: 600 !important;
         text-transform: uppercase; font-size: 11px !important;
         letter-spacing: 0.5px; color: #475569 !important;
+        text-align: left !important;
     }
-    .stDataFrame td { font-size: 13px !important; }
+    .stDataFrame td { font-size: 13px !important; text-align: left !important; }
 
     /* Headers */
     .page-banner {
@@ -2223,6 +2224,19 @@ elif view == "5 — Rent Roll":
     # ── Build turn history columns for a property ──
     TURN_ABBR = {"Full Turn": "FT", "Make Ready": "MR", "Partial Turn": "PT"}
 
+    def _bdba_to_fp(bdba):
+        """Convert rent roll BD/BA (e.g. '2/1.00') to turn data Floor Plan format (e.g. '2x1')."""
+        parts = str(bdba).split("/")
+        if len(parts) != 2:
+            return str(bdba)
+        try:
+            bd = int(float(parts[0].strip()))
+            ba_raw = float(parts[1].strip())
+            ba = int(ba_raw) if ba_raw == int(ba_raw) else ba_raw
+            return f"{bd}x{ba}"
+        except (ValueError, TypeError):
+            return str(bdba)
+
     @st.cache_data
     def get_avg_ft_cost(prop_name, _df_all):
         """Return average Full Turn cost for a property (total cost per turn event)."""
@@ -2232,6 +2246,20 @@ elif view == "5 — Rent Roll":
         ft["Move-Out Date"] = pd.to_datetime(ft["Move-Out Date"], errors="coerce")
         per_turn = ft.groupby(["Unit Number", "Move-Out Date"])["Invoice Amount"].sum()
         return per_turn.mean() if len(per_turn) else 0
+
+    @st.cache_data
+    def get_ft_cost_by_fp(prop_name, _df_all):
+        """Return dict of Floor Plan -> trailing 3-year avg FT cost at this property."""
+        ft = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Full Turn")].copy()
+        if ft.empty:
+            return {}
+        ft["Move-Out Date"] = pd.to_datetime(ft["Move-Out Date"], errors="coerce")
+        cutoff = pd.Timestamp.today() - pd.DateOffset(years=3)
+        ft = ft[ft["Move-Out Date"] >= cutoff]
+        if ft.empty:
+            return {}
+        per_turn = ft.groupby(["Floor Plan", "Unit Number", "Move-Out Date"])["Invoice Amount"].sum().reset_index()
+        return per_turn.groupby("Floor Plan")["Invoice Amount"].mean().to_dict()
 
     @st.cache_data
     def get_ft_units(prop_name, _df_all):
@@ -2308,6 +2336,7 @@ elif view == "5 — Rent Roll":
         rr = load_rent_roll(rr_path)
         ft_keys = get_ft_units(prop_choice, _df_all)
         avg_ft_cost = get_avg_ft_cost(prop_choice, _df_all)
+        fp_cost_map = get_ft_cost_by_fp(prop_choice, _df_all)
 
         # ── KPIs ──
         total_units = len(rr)
@@ -2357,7 +2386,7 @@ elif view == "5 — Rent Roll":
         fp_df = pd.DataFrame(fp_rows)
 
         def _highlight_premium(col):
-            if col.name == "% Premium":
+            if col.name in ("Avg Renovated Rent", "Avg Classic Rent", "% Premium"):
                 return ["background-color: #f0f4f8"] * len(col)
             return [""] * len(col)
 
@@ -2365,7 +2394,7 @@ elif view == "5 — Rent Roll":
 
         # ── Unit Detail — Renovation Analysis ──
         section(f"Rent Roll — {prop_choice}")
-        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic  •  FT budget based on property avg: {fmt(avg_ft_cost)}")
+        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic  •  FT budget = trailing 3-year avg by floor plan (falls back to property avg: {fmt(avg_ft_cost)})")
 
         display_rows = []
         for _, row in rr.iterrows():
@@ -2377,7 +2406,10 @@ elif view == "5 — Rent Roll":
             unit_ltl = mkt - rent
             upside = (unit_ltl / rent * 100) if rent > 0 else 0
             annual_lift = unit_ltl * 12
-            roi = (annual_lift / avg_ft_cost * 100) if avg_ft_cost > 0 and not is_renovated and unit_ltl > 0 else 0
+            # Look up floor-plan-specific FT budget, fall back to property avg
+            unit_fp = _bdba_to_fp(row["BD/BA"])
+            unit_budget = fp_cost_map.get(unit_fp, avg_ft_cost)
+            roi = (annual_lift / unit_budget * 100) if unit_budget > 0 and not is_renovated and unit_ltl > 0 else 0
 
             r = {
                 "Unit": unit_key,
@@ -2387,7 +2419,7 @@ elif view == "5 — Rent Roll":
                 "Loss to Lease": fmt(unit_ltl) if unit_ltl != 0 else "—",
                 "% Upside": f"{upside:.1f}%" if upside > 0 else "—",
                 "Status": "Renovated" if is_renovated else "Classic",
-                "FT Budget": fmt(avg_ft_cost) if not is_renovated else "—",
+                "FT Budget": fmt(unit_budget) if not is_renovated else "—",
                 "ROI %": f"{roi:.0f}%" if roi > 0 else "—",
             }
             display_rows.append(r)
