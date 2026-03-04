@@ -596,15 +596,26 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
             lambda x: f"{x:+.0%}" if pd.notna(x) and np.isfinite(x) else "—"
         )
 
-    # Style Total row with subtle distinction
-    def style_total_row(styler):
+    # Style: Total row + YoY column tint
+    yoy_col_labels = list(yoy_columns.keys())
+
+    def apply_styles(styler):
         styler.set_properties(
             subset=pd.IndexSlice["Total", :],
             **{"background-color": "#f1f5f9", "font-weight": "700", "border-top": "2px solid #cbd5e1"},
         )
+        if yoy_col_labels:
+            styler.set_properties(
+                subset=pd.IndexSlice[:, yoy_col_labels],
+                **{"background-color": "#f8fafc"},
+            )
+            styler.set_properties(
+                subset=pd.IndexSlice[:, yoy_col_labels[0]],
+                **{"border-left": "2px solid #e2e8f0"},
+            )
         return styler
 
-    st.dataframe(style_total_row(pivot_display.style), use_container_width=True)
+    st.dataframe(apply_styles(pivot_display.style), use_container_width=True)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
