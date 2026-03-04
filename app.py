@@ -2224,35 +2224,14 @@ elif view == "5 — Rent Roll":
     TURN_ABBR = {"Full Turn": "FT", "Make Ready": "MR", "Partial Turn": "PT"}
 
     @st.cache_data
-    def build_turn_history(prop_name, _df_all):
-        """Return a dict: compound_key → dict of year → 'FT - $26,000' string.
-        If multiple turns in the same year, entries are joined with ' / '."""
-        prop_lines = _df_all[_df_all["Property Name"] == prop_name].copy()
-        prop_lines["Move-Out Date"] = pd.to_datetime(prop_lines["Move-Out Date"], errors="coerce")
-        # Build compound key from turn data (normalize unit numbers for consistent matching)
-        prop_lines["_bldg"] = prop_lines["Building Code"].fillna("").astype(str).str.strip()
-        prop_lines["_unit"] = prop_lines["Unit Number"].astype(str).str.strip().apply(_norm_unit)
-        prop_lines["_key"] = prop_lines.apply(
-            lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
-        )
-        turns = prop_lines.groupby(["_key", "Move-Out Date", "Turn Type"]).agg(
-            Total_Cost=("Invoice Amount", "sum")
-        ).reset_index()
-        turns = turns.sort_values("Move-Out Date", ascending=False)
-
-        history = {}
-        for key, grp in turns.groupby("_key"):
-            year_data = {}
-            for _, r in grp.iterrows():
-                abbr = TURN_ABBR.get(r["Turn Type"], "??")
-                yr = r["Move-Out Date"].year
-                entry = f"{abbr} - {fmt(r['Total_Cost'])}"
-                if yr in year_data:
-                    year_data[yr] += f" / {entry}"
-                else:
-                    year_data[yr] = entry
-            history[key] = year_data
-        return history
+    def get_avg_ft_cost(prop_name, _df_all):
+        """Return average Full Turn cost for a property (total cost per turn event)."""
+        ft = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Full Turn")].copy()
+        if ft.empty:
+            return 0
+        ft["Move-Out Date"] = pd.to_datetime(ft["Move-Out Date"], errors="coerce")
+        per_turn = ft.groupby(["Unit Number", "Move-Out Date"])["Invoice Amount"].sum()
+        return per_turn.mean() if len(per_turn) else 0
 
     @st.cache_data
     def get_ft_units(prop_name, _df_all):
@@ -2327,8 +2306,8 @@ elif view == "5 — Rent Roll":
         prop_choice = st.selectbox("Select Property", rr_props)
         rr_path = _RR_DIR / _RR_FILES[prop_choice]
         rr = load_rent_roll(rr_path)
-        turn_hist = build_turn_history(prop_choice, _df_all)
         ft_keys = get_ft_units(prop_choice, _df_all)
+        avg_ft_cost = get_avg_ft_cost(prop_choice, _df_all)
 
         # ── KPIs ──
         total_units = len(rr)
@@ -2337,8 +2316,8 @@ elif view == "5 — Rent Roll":
         ltl = total_market - total_rent
         ltl_pct = ltl / total_market if total_market else 0
         rr_unit_set = set(rr["Unit"].astype(str).str.strip())
-        rr_mapped = {rr_to_turn_key(prop_choice, u) for u in rr_unit_set}
-        n_ft = len(rr_mapped & ft_keys)
+        rr_mapped_map = {u: rr_to_turn_key(prop_choice, u) for u in rr_unit_set}
+        n_ft = sum(1 for k in rr_mapped_map.values() if k in ft_keys)
         n_classic = total_units - n_ft
 
         k1, k2, k3, k4, k5 = st.columns(5)
@@ -2348,44 +2327,94 @@ elif view == "5 — Rent Roll":
         k4.metric("Renovated", f"{n_ft}", f"{n_ft / total_units * 100:.1f}%" if total_units else "-")
         k5.metric("Classic", f"{n_classic}", f"{n_classic / total_units * 100:.1f}%" if total_units else "-")
 
-        # ── Build combined table with year columns ──
-        _YEAR_COLS = [2026, 2025, 2024, 2023, 2022, 2021]
+        # ── Floor Plan Summary ──
+        section(f"Floor Plan Summary — {prop_choice}")
+        fp_rows = []
+        for fp, grp in rr.groupby("BD/BA"):
+            fp_units = grp["Unit"].astype(str).str.strip()
+            fp_mapped = {rr_to_turn_key(prop_choice, u) for u in fp_units}
+            fp_ren = fp_mapped & ft_keys
+            fp_classic = fp_mapped - ft_keys
+            # Get rents for renovated vs classic units
+            ren_rents = grp[grp["Unit"].astype(str).str.strip().apply(
+                lambda u: rr_to_turn_key(prop_choice, u) in ft_keys
+            )]["Rent"]
+            cls_rents = grp[grp["Unit"].astype(str).str.strip().apply(
+                lambda u: rr_to_turn_key(prop_choice, u) not in ft_keys
+            )]["Rent"]
+            avg_ren = ren_rents.mean() if len(ren_rents) else 0
+            avg_cls = cls_rents.mean() if len(cls_rents) else 0
+            premium = ((avg_ren - avg_cls) / avg_cls * 100) if avg_cls > 0 and avg_ren > 0 else 0
+            fp_rows.append({
+                "Floor Plan": fp,
+                "Units": len(grp),
+                "Renovated": len(fp_ren),
+                "Classic": len(fp_classic),
+                "Avg Renovated Rent": fmt(avg_ren) if avg_ren > 0 else "—",
+                "Avg Classic Rent": fmt(avg_cls) if avg_cls > 0 else "—",
+                "% Premium": f"{premium:.1f}%" if premium != 0 else "—",
+            })
+        fp_df = pd.DataFrame(fp_rows)
+
+        def _highlight_premium(col):
+            if col.name == "% Premium":
+                return ["background-color: #f0f4f8"] * len(col)
+            return [""] * len(col)
+
+        st.dataframe(fp_df.style.apply(_highlight_premium), use_container_width=True, hide_index=True)
+
+        # ── Unit Detail — Renovation Analysis ──
+        section(f"Rent Roll — {prop_choice}")
+        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic  •  FT budget based on property avg: {fmt(avg_ft_cost)}")
 
         display_rows = []
         for _, row in rr.iterrows():
             unit_key = str(row["Unit"]).strip()
+            mapped_key = rr_mapped_map.get(unit_key, _norm_unit(unit_key))
+            is_renovated = mapped_key in ft_keys
+            mkt = row["Market Rent"] if pd.notna(row["Market Rent"]) else 0
+            rent = row["Rent"] if pd.notna(row["Rent"]) else 0
+            unit_ltl = mkt - rent
+            upside = (unit_ltl / rent * 100) if rent > 0 else 0
+            annual_lift = unit_ltl * 12
+            roi = (annual_lift / avg_ft_cost * 100) if avg_ft_cost > 0 and not is_renovated and unit_ltl > 0 else 0
+
             r = {
                 "Unit": unit_key,
                 "BD/BA": row["BD/BA"],
-                "Market Rent": fmt(row["Market Rent"]) if pd.notna(row["Market Rent"]) else "",
-                "Rent": fmt(row["Rent"]) if pd.notna(row["Rent"]) else "",
-                "Move-in": row["Move-in"].strftime("%b %Y") if pd.notna(row["Move-in"]) else "",
+                "Market Rent": fmt(mkt) if mkt else "",
+                "Rent": fmt(rent) if rent else "",
+                "Loss to Lease": fmt(unit_ltl) if unit_ltl != 0 else "—",
+                "% Upside": f"{upside:.1f}%" if upside > 0 else "—",
+                "Status": "Renovated" if is_renovated else "Classic",
+                "FT Budget": fmt(avg_ft_cost) if not is_renovated else "—",
+                "ROI %": f"{roi:.0f}%" if roi > 0 else "—",
             }
-            mapped_key = rr_to_turn_key(prop_choice, unit_key)
-            year_data = turn_hist.get(mapped_key, {})
-            for yr in _YEAR_COLS:
-                r[str(yr)] = year_data.get(yr, "")
             display_rows.append(r)
 
         display_df = pd.DataFrame(display_rows)
 
-        section(f"Rent Roll — {prop_choice}")
-        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic")
-
-        def _highlight_year_cols(col):
-            if col.name in [str(y) for y in _YEAR_COLS]:
+        def _style_status(col):
+            if col.name == "Status":
+                return [
+                    "background-color: #d4edda; color: #155724" if v == "Renovated"
+                    else "background-color: #f8d7da; color: #721c24"
+                    for v in col
+                ]
+            if col.name in ("FT Budget", "ROI %"):
                 return ["background-color: #f0f4f8"] * len(col)
             return [""] * len(col)
 
         st.dataframe(
-            display_df.style.apply(_highlight_year_cols),
+            display_df.style.apply(_style_status),
             use_container_width=True, hide_index=True, height=700,
         )
 
         # ── Totals ──
-        tc1, tc2 = st.columns(2)
+        tc1, tc2, tc3 = st.columns(3)
         tc1.markdown(f"**Total Market Rent:** {fmt(total_market)}")
         tc2.markdown(f"**Total Rent:** {fmt(total_rent)}")
+        tc3.markdown(f"**Total Loss to Lease:** {fmt(ltl)}")
 
     st.markdown("---")
 
