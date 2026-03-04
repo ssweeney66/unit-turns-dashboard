@@ -715,7 +715,8 @@ view = st.sidebar.radio("View", [
     "2 — Portfolio Overview",
     "3 — Property Summary",
     "4 — Unit Search",
-    "5 — AI Data Review",
+    "5 — Rent Roll",
+    "6 — AI Data Review",
 ])
 
 st.sidebar.markdown("---")
@@ -729,7 +730,7 @@ st.sidebar.caption(
 # VIEW 3: PROPERTY SUMMARY
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if view == "3 — Property Summary":
-    banner("Property Summary", "Single-property deep dive — turn volume, expense breakdown, and category outliers")
+    banner("Property Summary", "Single-property deep dive — turn volume, expense breakdown, and category analysis")
 
     prop = st.selectbox("Select Property", PROPERTIES)
     p_turns = ft_turns[ft_turns["Property Name"] == prop].copy()
@@ -958,7 +959,6 @@ if view == "3 — Property Summary":
     # ══════════════════════════════════════════════════
     # CLOSING NARRATIVE — PROPERTY SUMMARY
     # ══════════════════════════════════════════════════
-    total_spend = p_turns["total_cost"].sum()
     avg_cost = p_turns["total_cost"].mean()
     port_avg_all = ft_turns["total_cost"].mean()
     vs_port = ((avg_cost - port_avg_all) / port_avg_all * 100) if port_avg_all > 0 else 0
@@ -2099,9 +2099,119 @@ elif view == "1 — Executive Summary":
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VIEW 5: AI DATA REVIEW
+# VIEW 5: RENT ROLL
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-elif view == "5 — AI Data Review":
+elif view == "5 — Rent Roll":
+    banner("Rent Roll", "Current occupancy with historical turn activity — Woodman (Test)")
+
+    # ── Load rent roll ──
+    @st.cache_data
+    def load_rent_roll(path):
+        """Load and clean a rent roll Excel file."""
+        rr = pd.read_excel(path, header=8)
+        rr = rr.dropna(how="all")
+        rr = rr[rr["Unit"].notna() & ~rr["Unit"].astype(str).str.contains("Units|Total", na=False)]
+        # Filter out property address rows (Collins has one after header)
+        rr = rr[~rr["Unit"].astype(str).str.contains("LLC|Properties", na=False)]
+        rr["Market Rent"] = pd.to_numeric(rr["Market Rent"], errors="coerce")
+        rr["Rent"] = pd.to_numeric(rr["Rent"], errors="coerce")
+        rr["Lease From"] = pd.to_datetime(rr["Lease From"], errors="coerce")
+        rr["Lease To"] = pd.to_datetime(rr["Lease To"], errors="coerce")
+        rr["Move-out"] = pd.to_datetime(rr["Move-out"], errors="coerce")
+        return rr
+
+    # ── Build turn history columns for a property ──
+    TURN_ABBR = {"Full Turn": "FT", "Make Ready": "MR", "Partial Turn": "PT"}
+
+    @st.cache_data
+    def build_turn_history(prop_name, _df_all):
+        """Return a dict: unit_key → list of 'FT 2025 - $26,000' strings (most recent first)."""
+        prop_lines = _df_all[_df_all["Property Name"] == prop_name].copy()
+        prop_lines["Move-Out Date"] = pd.to_datetime(prop_lines["Move-Out Date"], errors="coerce")
+        turns = prop_lines.groupby(["Unit Number", "Move-Out Date", "Turn Type"]).agg(
+            Total_Cost=("Invoice Amount", "sum")
+        ).reset_index()
+        turns = turns.sort_values("Move-Out Date", ascending=False)
+
+        history = {}
+        for unit, grp in turns.groupby("Unit Number"):
+            entries = []
+            for _, r in grp.iterrows():
+                abbr = TURN_ABBR.get(r["Turn Type"], "??")
+                yr = r["Move-Out Date"].year
+                cost = r["Total_Cost"]
+                entries.append(f"{abbr} {yr} - {fmt(cost)}")
+            history[str(unit).strip()] = entries
+        return history
+
+    # ── Woodman test ──
+    rr_path = Path("Rent Rolls/Rent Roll - Woodman.xlsx")
+    if not rr_path.exists():
+        st.error("Rent Roll file not found: Rent Rolls/Rent Roll - Woodman.xlsx")
+    else:
+        rr = load_rent_roll(rr_path)
+        turn_hist = build_turn_history("Woodman", _df_all)
+
+        # ── KPIs ──
+        total_units = len(rr)
+        occupied = (rr["Status"] == "Current").sum()
+        vacant = total_units - occupied
+        occ_rate = occupied / total_units if total_units else 0
+        total_market = rr["Market Rent"].sum()
+        total_rent = rr["Rent"].sum()
+        ltl = total_market - total_rent
+        ltl_pct = ltl / total_market if total_market else 0
+        units_with_turns = sum(1 for u in rr["Unit"].astype(str).str.strip() if u in turn_hist)
+
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Total Units", f"{total_units}")
+        k2.metric("Occupancy", pct(occ_rate), f"{vacant} vacant")
+        k3.metric("Monthly Rent", fmt(total_rent))
+        k4.metric("Loss to Lease", fmt(ltl), pct(ltl_pct))
+        k5.metric("Units w/ Turn History", f"{units_with_turns} of {total_units}")
+
+        # ── Build combined table ──
+        # Determine max turn columns needed
+        max_turns = max((len(v) for v in turn_hist.values()), default=0)
+
+        display_rows = []
+        for _, row in rr.iterrows():
+            unit_key = str(row["Unit"]).strip()
+            r = {
+                "Unit": unit_key,
+                "BD/BA": row["BD/BA"],
+                "Status": row["Status"],
+                "Market Rent": fmt(row["Market Rent"]) if pd.notna(row["Market Rent"]) else "",
+                "Rent": fmt(row["Rent"]) if pd.notna(row["Rent"]) else "",
+                "Lease From": row["Lease From"].strftime("%b %Y") if pd.notna(row["Lease From"]) else "",
+                "Lease To": row["Lease To"].strftime("%b %Y") if pd.notna(row["Lease To"]) else "",
+            }
+            # Add move-out only if any unit has one
+            if rr["Move-out"].notna().any():
+                r["Move-out"] = row["Move-out"].strftime("%b %d, %Y") if pd.notna(row["Move-out"]) else ""
+
+            # Turn history columns
+            entries = turn_hist.get(unit_key, [])
+            for i in range(max_turns):
+                col_name = f"Turn {i + 1}"
+                r[col_name] = entries[i] if i < len(entries) else ""
+
+            display_rows.append(r)
+
+        display_df = pd.DataFrame(display_rows)
+
+        section("Rent Roll — Woodman")
+        st.caption(f"{total_units} units  •  {occupied} occupied  •  {vacant} vacant  •  Turn history from invoice data (most recent → oldest)")
+
+        st.dataframe(display_df, use_container_width=True, hide_index=True, height=700)
+
+    footer()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# VIEW 6: AI DATA REVIEW
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+elif view == "6 — AI Data Review":
     banner("AI Data Review", "Ask questions about your portfolio data — powered by AI")
 
     # ── Build data context for the LLM ──

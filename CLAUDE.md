@@ -16,13 +16,36 @@
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Stack:** Streamlit 1.54.0, Pandas 2.3.3, Plotly 6.5.2, OpenAI, Anthropic, Google GenAI
 
-## Dashboard Structure (5 Tabs)
+## Dashboard Structure (7 Tabs)
 
 1. **Executive Summary** — Board-level KPIs, cost trajectory, property benchmarks, vendor risk, capital forecast, risk flags
 2. **Portfolio Overview** — Property × Year cost/volume matrices, Property × Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
-3. **Property Summary** — Single-property deep dive: volume, floor plans, expense group trend, category expenses, last 5 turns with floor plan comparison, outliers
+3. **Property Summary** — Single-property deep dive: volume, floor plans, expense group trend, category expenses, last 5 turns with floor plan comparison
 4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
+5. **Rent Roll** — (In Development) Property-level rent roll view from external Excel files
+6. **Vacancy** — (In Development) Unit vacancy analysis from external Excel file
+7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
+
+## Data Sources
+
+### Turn Data
+- **File:** `Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
+- **Key columns:** Property Name, Building Code, Unit Number, Floor Plan, Move-Out Date, Turn Type, Vendor Name, Invoice Amount, Budget Category, Cost Type
+
+### Rent Rolls (folder: `Rent Rolls/`)
+- **Files:** `Rent Roll - Woodman.xlsx`, `Rent Roll - Monterey Park.xlsx`, `Rent Roll - Collins.xlsx`
+- **Format:** 8 metadata header rows (skip), header at row 8, 2 footer/summary rows to filter out
+- **Columns (8):** Unit, BD/BA, Status, Market Rent, Rent, Lease From, Lease To, Move-out
+- **Cleanup:** `header=8`, drop all-NaN rows, filter out rows where Unit contains "Units" or "Total", filter out property address rows
+- **Collins quirk:** Has an extra property address row after the header that must be filtered (contains "COLLINS, LLC")
+
+### Rent Roll ↔ Turn Data Unit Mapping
+- **Woodman:** Direct match — rent roll Unit ("101") = turn data Unit Number ("101"), no Building Code
+- **Monterey Park:** Rent roll "505 Pomona, Unit A" → turn data Building Code "505 Pomona" + Unit Number "A"
+- **Collins:** Rent roll prefix encodes building address — "39-xx" → Building Code "18339 Collins" + Unit Number "xx"; "47-xx" → Building Code "18347 Collins" + Unit Number "xx"
+
+### Vacancy (folder: `Vacancy/`)
+- **File:** `Unit Vacancy.xlsx` — (Not yet analyzed)
 
 ## Data Model
 
