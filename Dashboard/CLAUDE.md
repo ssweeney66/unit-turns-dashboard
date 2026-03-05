@@ -11,7 +11,7 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `Dashboard/app.py` — single-file dashboard (~3,074 lines)
+- **File:** `Dashboard/app.py` — single-file dashboard (~3,130 lines)
 - **Data:** `Data/Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Live URL:** `https://unit-turns-dashboard-mbt5kfbyktdvpuebrcxtss.streamlit.app/`
