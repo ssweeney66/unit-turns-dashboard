@@ -11,12 +11,26 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `app.py` — single-file dashboard (~2,895 lines)
-- **Data:** `Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
+- **File:** `Dashboard/app.py` — single-file dashboard (~2,899 lines)
+- **Data:** `Data/Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Live URL:** `https://unit-turns-dashboard-t2yhaxw6dfvmrqixmdxprz.streamlit.app/`
 - **Auth:** Password gate via `st.secrets["password"]` — set in Streamlit Cloud Settings → Secrets
 - **Stack:** Streamlit 1.54.0, Pandas 2.3.3, Plotly 6.5.2, OpenAI, Anthropic, Google GenAI, fpdf2
+
+## Folder Structure
+```
+Claude Test/
+├── Dashboard/          ← app code lives here
+│   ├── app.py
+│   ├── CLAUDE.md
+│   └── requirements.txt
+└── Data/               ← all data files live here
+    ├── Unit Turns - AI Clean - 2.26.2026.xlsx
+    ├── Rent Rolls/     (16 property rent roll files)
+    └── Vacancy/        (Unit Vacancy.xlsx)
+```
+- All data paths in app.py use `Path(__file__).parent.parent / "Data" / ...` to reach the sibling Data folder
 
 ## Dashboard Structure (7 Tabs)
 
@@ -24,7 +38,7 @@
 2. **Portfolio Overview** — Property x Year cost/volume matrices, Property x Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
 3. **Property Summary** — Single-property deep dive: volume, floor plans, category expenses (Core Labor/Materials/Other avg per turn), last 5 turns with floor plan comparison
 4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **Rent Roll** — Portfolio Renovated vs Classic summary (% columns), floor plan summary (avg reno/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Status (green/red), FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
+5. **Rent Roll** — Portfolio Renovated vs Classic summary (% columns), floor plan summary (avg reno/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Move-In, Status (green/red), FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
 6. **Data Health** — File timestamp monitoring with 90-day freshness threshold (green/red/missing signals)
 7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 
@@ -34,7 +48,7 @@
 - **File:** `Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Key columns:** Property Name, Building Code, Unit Number, Floor Plan, Move-Out Date, Turn Type, Vendor Name, Invoice Amount, Budget Category, Cost Type
 
-### Rent Rolls (folder: `Rent Rolls/`)
+### Rent Rolls (folder: `Data/Rent Rolls/`)
 - **Active files (16):** Woodman, MontereyPark, Collins, 51Village, Lindley, ElRancho, Alta Vista, Roscoe, Woodbridge, Darby, Dickens, Fruitland, Garfield, Topanga, 12756Moorpark, 12800Moorpark
 - **No turn data (2):** 12756 Moorpark (10 units), 12800 Moorpark (18 units) — all Classic, no matching property in turn data
 - **All properties covered** — Topanga rent roll now active (40 units, direct match, "301 HUD" suffix stripped)
@@ -67,7 +81,7 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - **Monterey Park:** "505 Pomona, Unit A" -> "505 Pomona|A". Address normalization strips directional prefixes (W, S) and suffixes (Ave, Blvd, Dr). Spelling correction: rent roll "Hendricks" = turn data "Hendericks". Unit suffixes like "- ASST. MGR" or "- HUD" stripped to single letter.
 - **Collins:** "39-xx" -> "18339 Collins|xx"; "47-xx" -> "18347 Collins|xx". Suffixes like "-MGR" are stripped.
 
-### Vacancy (folder: `Vacancy/`)
+### Vacancy (folder: `Data/Vacancy/`)
 - **File:** `Unit Vacancy.xlsx` — not yet analyzed or integrated
 
 ## Data Model
@@ -98,7 +112,7 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - Property sort order uses `_PROP_RANK` / `PROPERTY_ORDER`
 - All tables use standardized category grouping: Core Labor -> Core Materials -> Other
 - Classic % uses direct `f"{value * 100:.1f}%"` — do NOT use `pct()` (which is for YoY deltas with "+" prefix)
-- File paths on Streamlit Cloud must use `Path(__file__).parent` — never bare relative paths
+- File paths must use `Path(__file__).parent.parent / "Data"` to reach the sibling Data folder — never bare relative paths
 - When writing narrative insights with `pct()`, use `abs()` with directional words ("above"/"below") to avoid double-negatives like "-12.3% below"
 - Benchmark aggregations: use `median` for duration (named `med_duration`), `mean` for costs
 - Export button labels: use "📥 Excel" / "📥 PDF" (compact, consistent)

@@ -649,7 +649,7 @@ def render_category_table(title, categories, data, years=None, year_labels=None,
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @st.cache_data
 def load_data():
-    path = Path(__file__).parent / "Unit Turns - AI Clean - 2.26.2026.xlsx"
+    path = Path(__file__).parent.parent / "Data" / "Unit Turns - AI Clean - 2.26.2026.xlsx"
     df = pd.read_excel(path)
 
     df["Building Code"] = df["Building Code"].fillna("").astype(str).str.strip()
@@ -2063,7 +2063,7 @@ elif view == "5 — Rent Roll":
     banner("Rent Roll", "Renovation status, loss-to-lease analysis, and full turn ROI by unit")
 
     # ── Rent roll file registry ──
-    _RR_DIR = Path(__file__).parent / "Rent Rolls"
+    _RR_DIR = Path(__file__).parent.parent / "Data" / "Rent Rolls"
     _RR_FILES = {
         "Monterey Park": "Rent Roll - MontereyPark.xlsx",
         "Woodman": "Rent Roll - Woodman.xlsx",
@@ -2477,7 +2477,7 @@ elif view == "5 — Rent Roll":
 elif view == "6 — Data Health":
     banner("Data Health", "Data source freshness and update compliance")
 
-    _APP_DIR = Path(__file__).parent
+    _DATA_DIR = Path(__file__).parent.parent / "Data"
     _STALE_DAYS = 90  # 3 months
 
     def file_health(path, label):
@@ -2498,11 +2498,11 @@ elif view == "6 — Data Health":
     health_rows = []
 
     # Turn data
-    turn_path = _APP_DIR / "Unit Turns - AI Clean - 2.26.2026.xlsx"
+    turn_path = _DATA_DIR / "Unit Turns - AI Clean - 2.26.2026.xlsx"
     health_rows.append(file_health(turn_path, "Unit Turn Data"))
 
     # Rent rolls
-    _RR_DIR_H = _APP_DIR / "Rent Rolls"
+    _RR_DIR_H = _DATA_DIR / "Rent Rolls"
     rr_files = {
         "Rent Roll — Monterey Park": "Rent Roll - MontereyPark.xlsx",
         "Rent Roll — Woodman": "Rent Roll - Woodman.xlsx",
@@ -2525,10 +2525,12 @@ elif view == "6 — Data Health":
         health_rows.append(file_health(_RR_DIR_H / fname, label))
 
     # Vacancy
-    vac_path = _APP_DIR / "Vacancy" / "Unit Vacancy.xlsx"
+    vac_path = _DATA_DIR / "Vacancy" / "Unit Vacancy.xlsx"
     health_rows.append(file_health(vac_path, "Unit Vacancy"))
 
     health_df = pd.DataFrame(health_rows)
+    _status_priority = {"❌ Missing": 0, "🔴 Stale": 1, "✅ Current": 2}
+    health_df = health_df.sort_values("Status", key=lambda s: s.map(_status_priority)).reset_index(drop=True)
 
     # Summary metrics — top of page for immediate visibility
     total_sources = len(health_rows)
