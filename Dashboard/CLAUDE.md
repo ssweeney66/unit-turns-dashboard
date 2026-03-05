@@ -11,7 +11,7 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `Dashboard/app.py` — single-file dashboard (~2,947 lines)
+- **File:** `Dashboard/app.py` — single-file dashboard (~3,055 lines)
 - **Data:** `Data/Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Live URL:** `https://unit-turns-dashboard-mbt5kfbyktdvpuebrcxtss.streamlit.app/`
@@ -39,8 +39,8 @@ Claude Test/
 1. **Executive Summary** — Board-level KPIs, cost trajectory, property benchmarks, vendor risk, capital forecast, risk flags
 2. **Portfolio Overview** — Property x Year cost/volume matrices, Property x Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
 3. **Property Summary** — Single-property deep dive: volume, floor plans, category expenses (Core Labor/Materials/Other avg per turn), last 5 turns with floor plan comparison
-4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **Rent Roll** — Portfolio Renovated / Partial / Classic summary (% columns), floor plan summary (avg reno/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Move-In, Status (green/amber/red), Last Full Turn, FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
+4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF), comparable turns used detail, floor plan comparison (category-level cost breakdown across same-FP turns), vendor recommendations (most-used vendor per projected category, last 2 years)
+5. **Rent Roll** — Portfolio Renovated / Partial / Classic summary (% columns), floor plan summary (avg reno/partial/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Move-In, Status (green/amber/red), Last Full Turn, FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
 6. **Data Health** — File timestamp monitoring with 90-day freshness threshold (green/red/missing signals)
 7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 

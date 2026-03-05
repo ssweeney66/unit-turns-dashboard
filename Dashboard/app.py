@@ -485,7 +485,7 @@ def render_floor_plan_comparison_table(fp_lines, fp_turns_info):
     """Build an HTML table comparing category costs across comparable same-floor-plan turns.
 
     fp_lines: DataFrame of invoice line items for the comparable turns
-    fp_turns_info: DataFrame with Turn Key, Unit Label, Move-Out Date, total_cost (one row per turn)
+    fp_turns_info: DataFrame with Turn Key, Unit Label, Move-Out Date, Turn Type (one row per turn)
     Returns HTML string.
     """
     ALL_CATS = CORE_LABOR + CORE_MATERIALS + OTHER_CATS
@@ -1650,6 +1650,110 @@ elif view == "4 — Unit Search":
                     f"confirm necessity before approving work orders to avoid scope creep."
                 )
 
+            # ══════════════════════════════════════════════════
+            # COMPARABLE TURNS USED
+            # ══════════════════════════════════════════════════
+            section("Comparable Turns Used")
+            comp_summary = comp_lines.groupby("Turn Key").agg(
+                Unit_Label=("Unit Label", "first"),
+                Floor_Plan=("Floor Plan", "first"),
+                Move_Out=("Move-Out Date", "first"),
+                Turn_Type=("Turn Type", "first"),
+                Total_Cost=("Invoice Amount", "sum"),
+                Categories=("Budget Category", "nunique"),
+            ).reset_index(drop=True)
+            comp_summary = comp_summary.sort_values("Move_Out", ascending=False).reset_index(drop=True)
+            comp_summary["Move_Out"] = comp_summary["Move_Out"].dt.strftime("%b %Y")
+            comp_summary["Total_Cost"] = comp_summary["Total_Cost"].apply(fmt)
+            comp_summary.columns = ["Unit", "Floor Plan", "Move-Out", "Turn Type", "Total Cost", "Categories"]
+            st.dataframe(comp_summary, use_container_width=True, hide_index=True, height=min(35 + 35 * len(comp_summary), 220))
+            st.caption(f"These {len(comp_summary)} turns were used to calculate the projected scope above.")
+
+            # ══════════════════════════════════════════════════
+            # FLOOR PLAN COMPARISON
+            # ══════════════════════════════════════════════════
+            if unit_floor_plan:
+                # Find up to 5 most recent same-floor-plan turns at this property
+                # Exclude turns from the current unit to avoid self-comparison
+                fp_comp_df = _df_all[
+                    (_df_all["Property Name"] == prop_choice)
+                    & (_df_all["Floor Plan"] == unit_floor_plan)
+                    & (_df_all["Unit Label"] != unit_choice)
+                ].copy()
+                fp_comp_turns = (
+                    fp_comp_df.groupby("Turn Key").agg(
+                        Unit_Label=("Unit Label", "first"),
+                        Move_Out_Date=("Move-Out Date", "first"),
+                        Turn_Type=("Turn Type", "first"),
+                        total_cost=("Invoice Amount", "sum"),
+                    ).reset_index()
+                    .sort_values("Move_Out_Date", ascending=False)
+                    .head(5)
+                )
+                fp_comp_turns = fp_comp_turns.rename(columns={
+                    "Unit_Label": "Unit Label",
+                    "Move_Out_Date": "Move-Out Date",
+                    "Turn_Type": "Turn Type",
+                })
+
+                if len(fp_comp_turns) > 0:
+                    section(f"Floor Plan Comparison — {unit_floor_plan}")
+                    fp_comp_keys = fp_comp_turns["Turn Key"].tolist()
+                    fp_comp_lines = fp_comp_df[fp_comp_df["Turn Key"].isin(fp_comp_keys)].copy()
+                    fp_table_html = render_floor_plan_comparison_table(fp_comp_lines, fp_comp_turns)
+                    st.markdown(
+                        f'<div class="scope-card scope-card-history">'
+                        f'<p class="scope-title">Floor Plan Comparison — {unit_floor_plan}</p>'
+                        f'<p class="scope-subtitle">Most recent {len(fp_comp_turns)} turns on {unit_floor_plan} units at {prop_choice} — compare category-level costs</p>'
+                        f'{fp_table_html}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # ══════════════════════════════════════════════════
+            # VENDOR RECOMMENDATIONS
+            # ══════════════════════════════════════════════════
+            section("Vendor Recommendations")
+            vendor_cutoff = pd.Timestamp.now() - pd.DateOffset(years=2)
+            vendor_pool = _df_all[
+                (_df_all["Property Name"] == prop_choice)
+                & (_df_all["Move-Out Date"] >= vendor_cutoff)
+            ].copy()
+
+            # Only show categories that are in the active projection (adjusted > 0)
+            active_cats = [c for c in (CORE_LABOR + CORE_MATERIALS + OTHER_CATS) if adjusted_amounts.get(c, 0) > 0]
+            vendor_rows = []
+            for cat in active_cats:
+                cat_items = vendor_pool[vendor_pool["Budget Category"] == cat]
+                if cat_items.empty:
+                    continue
+                # Find the vendor used most frequently (by distinct turns)
+                v_turns = cat_items.groupby("Vendor Name").agg(
+                    turn_count=("Turn Key", "nunique"),
+                    total_spend=("Invoice Amount", "sum"),
+                    last_used=("Move-Out Date", "max"),
+                ).reset_index()
+                v_turns = v_turns.sort_values(["turn_count", "last_used"], ascending=[False, False])
+                top = v_turns.iloc[0]
+                avg_cost = top["total_spend"] / top["turn_count"] if top["turn_count"] > 0 else 0
+                vendor_rows.append({
+                    "Category": cat,
+                    "Recommended Vendor": top["Vendor Name"],
+                    "Times Used": int(top["turn_count"]),
+                    "Avg Cost": fmt(avg_cost),
+                    "Last Used": top["last_used"].strftime("%b %Y") if pd.notna(top["last_used"]) else "—",
+                })
+            if vendor_rows:
+                vendor_rec_df = pd.DataFrame(vendor_rows)
+                st.dataframe(vendor_rec_df, use_container_width=True, hide_index=True)
+                insight(
+                    f"Based on the last 2 years at <strong>{prop_choice}</strong>. "
+                    f"Vendors shown handled each category most frequently — "
+                    f"consider getting competitive bids for high-cost categories."
+                )
+            else:
+                st.info("No recent vendor data available for the projected categories at this property.")
+
         else:
             # Fallback: no comps found at all
             if proj_type == "Full Turn":
@@ -2351,14 +2455,17 @@ elif view == "5 — Rent Roll":
             fp_ren = fp_mapped & ft_keys
             fp_pt = (fp_mapped & pt_keys) - ft_keys
             fp_classic = fp_mapped - ft_keys - pt_keys
-            # Get rents for renovated vs non-renovated units
-            ren_rents = grp[grp["Unit"].astype(str).str.strip().apply(
-                lambda u: rr_to_turn_key(prop_choice, u) in ft_keys
-            )]["Rent"]
-            cls_rents = grp[grp["Unit"].astype(str).str.strip().apply(
-                lambda u: rr_to_turn_key(prop_choice, u) not in ft_keys
-            )]["Rent"]
+            # Get rents for each status bucket
+            unit_keys = grp["Unit"].astype(str).str.strip()
+            mapped_keys = unit_keys.apply(lambda u: rr_to_turn_key(prop_choice, u))
+            ren_mask = mapped_keys.apply(lambda k: k in ft_keys)
+            pt_mask = mapped_keys.apply(lambda k: k in pt_keys and k not in ft_keys)
+            cls_mask = ~ren_mask & ~pt_mask
+            ren_rents = grp.loc[ren_mask, "Rent"]
+            pt_rents = grp.loc[pt_mask, "Rent"]
+            cls_rents = grp.loc[cls_mask, "Rent"]
             avg_ren = ren_rents.mean() if len(ren_rents) else 0
+            avg_pt = pt_rents.mean() if len(pt_rents) else 0
             avg_cls = cls_rents.mean() if len(cls_rents) else 0
             premium = ((avg_ren - avg_cls) / avg_cls * 100) if avg_cls > 0 and avg_ren > 0 else 0
             fp_rows.append({
@@ -2368,13 +2475,14 @@ elif view == "5 — Rent Roll":
                 "Partial": len(fp_pt),
                 "Classic": len(fp_classic),
                 "Avg Renovated Rent": fmt(avg_ren) if avg_ren > 0 else "—",
+                "Avg Partial Rent": fmt(avg_pt) if avg_pt > 0 else "—",
                 "Avg Classic Rent": fmt(avg_cls) if avg_cls > 0 else "—",
                 "% Premium": f"{premium:.1f}%" if premium != 0 else "—",
             })
         fp_df = pd.DataFrame(fp_rows)
 
         def _highlight_premium(col):
-            if col.name in ("Avg Renovated Rent", "Avg Classic Rent", "% Premium"):
+            if col.name in ("Avg Renovated Rent", "Avg Partial Rent", "Avg Classic Rent", "% Premium"):
                 return ["background-color: #f0f4f8"] * len(col)
             return [""] * len(col)
 
