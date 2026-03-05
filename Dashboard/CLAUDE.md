@@ -40,7 +40,7 @@ Claude Test/
 2. **Portfolio Overview** — Property x Year cost/volume matrices, Property x Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
 3. **Property Summary** — Single-property deep dive: volume, floor plans, category expenses (Core Labor/Materials/Other avg per turn), last 5 turns with floor plan comparison
 4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **Rent Roll** — Portfolio Renovated vs Classic summary (% columns), floor plan summary (avg reno/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Move-In, Status (green/red), FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
+5. **Rent Roll** — Portfolio Renovated vs Classic summary (% columns), floor plan summary (avg reno/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Move-In, Status (green/red), Total Spend, Last Full Turn, FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
 6. **Data Health** — File timestamp monitoring with 90-day freshness threshold (green/red/missing signals)
 7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 

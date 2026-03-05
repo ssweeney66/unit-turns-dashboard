@@ -2219,6 +2219,36 @@ elif view == "5 — Rent Roll":
         )
         return set(ft["_key"])
 
+    @st.cache_data
+    def get_unit_total_spend(prop_name, _df_all):
+        """Return dict of compound_key -> total spend (all turn types, all time)."""
+        prop = _df_all[_df_all["Property Name"] == prop_name].copy()
+        if prop.empty:
+            return {}
+        prop["_bldg"] = prop["Building Code"].fillna("").astype(str).str.strip()
+        prop["_unit"] = prop["Unit Number"].astype(str).str.strip().apply(_norm_unit)
+        prop["_key"] = prop.apply(
+            lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
+        )
+        return prop.groupby("_key")["Invoice Amount"].sum().to_dict()
+
+    @st.cache_data
+    def get_unit_last_ft(prop_name, _df_all):
+        """Return dict of compound_key -> (year, cost) for the most recent Full Turn."""
+        ft = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Full Turn")].copy()
+        if ft.empty:
+            return {}
+        ft["_bldg"] = ft["Building Code"].fillna("").astype(str).str.strip()
+        ft["_unit"] = ft["Unit Number"].astype(str).str.strip().apply(_norm_unit)
+        ft["_key"] = ft.apply(
+            lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
+        )
+        ft["Move-Out Date"] = pd.to_datetime(ft["Move-Out Date"], errors="coerce")
+        per_turn = ft.groupby(["_key", "Move-Out Date"])["Invoice Amount"].sum().reset_index()
+        idx = per_turn.groupby("_key")["Move-Out Date"].idxmax()
+        latest = per_turn.loc[idx]
+        return {r["_key"]: (r["Move-Out Date"].year, r["Invoice Amount"]) for _, r in latest.iterrows()}
+
     # ── Portfolio Summary — Classic vs Full Turn ──
     section("Portfolio Summary — Classic vs. Full Turn")
     st.caption("Classic = unit with no Full Turn on record  •  Properties without rent rolls show turn data only")
@@ -2284,6 +2314,8 @@ elif view == "5 — Rent Roll":
         ft_keys = get_ft_units(prop_choice, _df_all)
         avg_ft_cost = get_avg_ft_cost(prop_choice, _df_all)
         fp_cost_map = get_ft_cost_by_fp(prop_choice, _df_all)
+        spend_map = get_unit_total_spend(prop_choice, _df_all)
+        last_ft_map = get_unit_last_ft(prop_choice, _df_all)
 
         # ── KPIs ──
         total_units = len(rr)
@@ -2361,6 +2393,11 @@ elif view == "5 — Rent Roll":
             move_in = row["Move-in"]
             move_in_str = move_in.strftime("%b %d, %Y") if pd.notna(move_in) else "—"
 
+            # Spend history lookups
+            total_spend = spend_map.get(mapped_key, 0)
+            last_ft = last_ft_map.get(mapped_key, None)
+            last_ft_str = f"{last_ft[0]} — {fmt(last_ft[1])}" if last_ft else "—"
+
             r = {
                 "Unit": unit_key,
                 "BD/BA": row["BD/BA"],
@@ -2370,6 +2407,8 @@ elif view == "5 — Rent Roll":
                 "% Upside": f"{upside:.1f}%" if upside > 0 else "—",
                 "Move-In": move_in_str,
                 "Status": "Renovated" if is_renovated else "Classic",
+                "Total Spend": fmt(total_spend) if total_spend > 0 else "—",
+                "Last Full Turn": last_ft_str,
                 "FT Budget": fmt(unit_budget) if not is_renovated else "—",
                 "ROI %": f"{roi:.0f}%" if roi > 0 else "—",
             }
@@ -2384,6 +2423,8 @@ elif view == "5 — Rent Roll":
                     else "background-color: #f8d7da; color: #721c24"
                     for v in col
                 ]
+            if col.name in ("Total Spend", "Last Full Turn"):
+                return ["background-color: #fef9f3"] * len(col)
             if col.name in ("FT Budget", "ROI %"):
                 return ["background-color: #f0f4f8"] * len(col)
             return [""] * len(col)
@@ -2440,7 +2481,7 @@ elif view == "5 — Rent Roll":
                 & (_out_turns["_bldg"] == orow["_bldg"])
                 & (_out_turns["Unit Number"] == orow["Unit Number"])
             )
-            detail = _out_turns[mask].sort_values("Move-Out Date")
+            detail = _out_turns[mask].sort_values("Move-Out Date", ascending=False)
             summaries = []
             for _, t in detail.iterrows():
                 abbr = TURN_ABBR.get(t["Turn Type"], "??")
