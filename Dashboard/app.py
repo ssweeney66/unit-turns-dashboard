@@ -2220,17 +2220,17 @@ elif view == "5 — Rent Roll":
         return set(ft["_key"])
 
     @st.cache_data
-    def get_unit_total_spend(prop_name, _df_all):
-        """Return dict of compound_key -> total spend (all turn types, all time)."""
-        prop = _df_all[_df_all["Property Name"] == prop_name].copy()
-        if prop.empty:
-            return {}
-        prop["_bldg"] = prop["Building Code"].fillna("").astype(str).str.strip()
-        prop["_unit"] = prop["Unit Number"].astype(str).str.strip().apply(_norm_unit)
-        prop["_key"] = prop.apply(
+    def get_pt_units(prop_name, _df_all):
+        """Return set of compound keys for units that have had at least one Partial Turn."""
+        pt = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Partial Turn")].copy()
+        if pt.empty:
+            return set()
+        pt["_bldg"] = pt["Building Code"].fillna("").astype(str).str.strip()
+        pt["_unit"] = pt["Unit Number"].astype(str).str.strip().apply(_norm_unit)
+        pt["_key"] = pt.apply(
             lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
         )
-        return prop.groupby("_key")["Invoice Amount"].sum().to_dict()
+        return set(pt["_key"])
 
     @st.cache_data
     def get_unit_last_ft(prop_name, _df_all):
@@ -2249,9 +2249,9 @@ elif view == "5 — Rent Roll":
         latest = per_turn.loc[idx]
         return {r["_key"]: (r["Move-Out Date"].year, r["Invoice Amount"]) for _, r in latest.iterrows()}
 
-    # ── Portfolio Summary — Classic vs Full Turn ──
-    section("Portfolio Summary — Classic vs. Full Turn")
-    st.caption("Classic = unit with no Full Turn on record  •  Properties without rent rolls show turn data only")
+    # ── Portfolio Summary — Renovation Status ──
+    section("Portfolio Summary — Renovation Status")
+    st.caption("Renovated = Full Turn on record  •  Partial = Partial Turn only  •  Classic = no Full or Partial Turn")
 
     summary_rows = []
     for prop in PROPERTY_ORDER:
@@ -2262,37 +2262,42 @@ elif view == "5 — Rent Roll":
         if has_rr:
             rr_data = load_rent_roll(rr_path)
             rr_units = set(rr_data["Unit"].astype(str).str.strip())
-            ft_keys = get_ft_units(prop, _df_all)
-            # Map rent roll unit IDs to turn data compound keys for matching
+            _ft_keys = get_ft_units(prop, _df_all)
+            _pt_keys = get_pt_units(prop, _df_all)
             rr_mapped = {rr_to_turn_key(prop, u) for u in rr_units}
             n_units = len(rr_units)
-            n_ft = len(rr_mapped & ft_keys)
-            n_classic = n_units - n_ft
+            n_ft = len(rr_mapped & _ft_keys)
+            n_pt = len((rr_mapped & _pt_keys) - _ft_keys)
+            n_classic = n_units - n_ft - n_pt
             ren_pct = f"{n_ft / n_units * 100:.1f}%" if n_units else "—"
+            partial_pct = f"{n_pt / n_units * 100:.1f}%" if n_units else "—"
             classic_pct = f"{n_classic / n_units * 100:.1f}%" if n_units else "—"
             summary_rows.append({
                 "Property": prop,
                 "Units": n_units,
                 "Renovated": n_ft,
+                "Partial": n_pt,
                 "Classic": n_classic,
                 "% Renovated": ren_pct,
+                "% Partial": partial_pct,
                 "% Classic": classic_pct,
             })
         else:
-            # Placeholder — no rent roll yet
             summary_rows.append({
                 "Property": prop,
                 "Units": "—",
                 "Renovated": "—",
+                "Partial": "—",
                 "Classic": "—",
                 "% Renovated": "—",
+                "% Partial": "—",
                 "% Classic": "—",
             })
 
     summary_df = pd.DataFrame(summary_rows)
 
     def _highlight_pct_cols(col):
-        if col.name in ("% Renovated", "% Classic"):
+        if col.name in ("% Renovated", "% Partial", "% Classic"):
             return ["background-color: #f0f4f8"] * len(col)
         return [""] * len(col)
 
@@ -2312,9 +2317,9 @@ elif view == "5 — Rent Roll":
         rr_path = _RR_DIR / _RR_FILES[prop_choice]
         rr = load_rent_roll(rr_path)
         ft_keys = get_ft_units(prop_choice, _df_all)
+        pt_keys = get_pt_units(prop_choice, _df_all)
         avg_ft_cost = get_avg_ft_cost(prop_choice, _df_all)
         fp_cost_map = get_ft_cost_by_fp(prop_choice, _df_all)
-        spend_map = get_unit_total_spend(prop_choice, _df_all)
         last_ft_map = get_unit_last_ft(prop_choice, _df_all)
 
         # ── KPIs ──
@@ -2326,14 +2331,16 @@ elif view == "5 — Rent Roll":
         rr_unit_set = set(rr["Unit"].astype(str).str.strip())
         rr_mapped_map = {u: rr_to_turn_key(prop_choice, u) for u in rr_unit_set}
         n_ft = sum(1 for k in rr_mapped_map.values() if k in ft_keys)
-        n_classic = total_units - n_ft
+        n_pt = sum(1 for k in rr_mapped_map.values() if k in pt_keys and k not in ft_keys)
+        n_classic = total_units - n_ft - n_pt
 
-        k1, k2, k3, k4, k5 = st.columns(5)
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
         k1.metric("Total Units", f"{total_units}")
         k2.metric("Monthly Rent", fmt(total_rent))
         k3.metric("Loss to Lease", fmt(ltl), f"{ltl_pct * 100:.1f}%")
         k4.metric("Renovated", f"{n_ft}", f"{n_ft / total_units * 100:.1f}%" if total_units else "—")
-        k5.metric("Classic", f"{n_classic}", f"{n_classic / total_units * 100:.1f}%" if total_units else "—")
+        k5.metric("Partial", f"{n_pt}", f"{n_pt / total_units * 100:.1f}%" if total_units else "—")
+        k6.metric("Classic", f"{n_classic}", f"{n_classic / total_units * 100:.1f}%" if total_units else "—")
 
         # ── Floor Plan Summary ──
         section(f"Floor Plan Summary — {prop_choice}")
@@ -2342,8 +2349,9 @@ elif view == "5 — Rent Roll":
             fp_units = grp["Unit"].astype(str).str.strip()
             fp_mapped = {rr_to_turn_key(prop_choice, u) for u in fp_units}
             fp_ren = fp_mapped & ft_keys
-            fp_classic = fp_mapped - ft_keys
-            # Get rents for renovated vs classic units
+            fp_pt = (fp_mapped & pt_keys) - ft_keys
+            fp_classic = fp_mapped - ft_keys - pt_keys
+            # Get rents for renovated vs non-renovated units
             ren_rents = grp[grp["Unit"].astype(str).str.strip().apply(
                 lambda u: rr_to_turn_key(prop_choice, u) in ft_keys
             )]["Rent"]
@@ -2357,6 +2365,7 @@ elif view == "5 — Rent Roll":
                 "Floor Plan": fp,
                 "Units": len(grp),
                 "Renovated": len(fp_ren),
+                "Partial": len(fp_pt),
                 "Classic": len(fp_classic),
                 "Avg Renovated Rent": fmt(avg_ren) if avg_ren > 0 else "—",
                 "Avg Classic Rent": fmt(avg_cls) if avg_cls > 0 else "—",
@@ -2373,13 +2382,15 @@ elif view == "5 — Rent Roll":
 
         # ── Unit Detail — Renovation Analysis ──
         section(f"Rent Roll — {prop_choice}")
-        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_classic} classic  •  FT Budget based on trailing 3-year avg per floor plan")
+        st.caption(f"{total_units} units  •  {n_ft} renovated  •  {n_pt} partial  •  {n_classic} classic  •  FT Budget based on trailing 3-year avg per floor plan")
 
         display_rows = []
         for _, row in rr.iterrows():
             unit_key = str(row["Unit"]).strip()
             mapped_key = rr_mapped_map.get(unit_key, _norm_unit(unit_key))
             is_renovated = mapped_key in ft_keys
+            is_partial = mapped_key in pt_keys and not is_renovated
+            status = "Renovated" if is_renovated else ("Partial" if is_partial else "Classic")
             mkt = row["Market Rent"] if pd.notna(row["Market Rent"]) else 0
             rent = row["Rent"] if pd.notna(row["Rent"]) else 0
             unit_ltl = mkt - rent
@@ -2393,8 +2404,7 @@ elif view == "5 — Rent Roll":
             move_in = row["Move-in"]
             move_in_str = move_in.strftime("%b %d, %Y") if pd.notna(move_in) else "—"
 
-            # Spend history lookups
-            total_spend = spend_map.get(mapped_key, 0)
+            # Last Full Turn lookup
             last_ft = last_ft_map.get(mapped_key, None)
             last_ft_str = f"{last_ft[0]} — {fmt(last_ft[1])}" if last_ft else "—"
 
@@ -2406,8 +2416,7 @@ elif view == "5 — Rent Roll":
                 "Loss to Lease": fmt(unit_ltl) if unit_ltl != 0 else "—",
                 "% Upside": f"{upside:.1f}%" if upside > 0 else "—",
                 "Move-In": move_in_str,
-                "Status": "Renovated" if is_renovated else "Classic",
-                "Total Spend": fmt(total_spend) if total_spend > 0 else "—",
+                "Status": status,
                 "Last Full Turn": last_ft_str,
                 "FT Budget": fmt(unit_budget) if not is_renovated else "—",
                 "ROI %": f"{roi:.0f}%" if roi > 0 else "—",
@@ -2420,10 +2429,11 @@ elif view == "5 — Rent Roll":
             if col.name == "Status":
                 return [
                     "background-color: #d4edda; color: #155724" if v == "Renovated"
+                    else "background-color: #fff3cd; color: #856404" if v == "Partial"
                     else "background-color: #f8d7da; color: #721c24"
                     for v in col
                 ]
-            if col.name in ("Total Spend", "Last Full Turn"):
+            if col.name == "Last Full Turn":
                 return ["background-color: #fef9f3"] * len(col)
             if col.name in ("FT Budget", "ROI %"):
                 return ["background-color: #f0f4f8"] * len(col)

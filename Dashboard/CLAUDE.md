@@ -11,7 +11,7 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `Dashboard/app.py` — single-file dashboard (~2,896 lines)
+- **File:** `Dashboard/app.py` — single-file dashboard (~2,947 lines)
 - **Data:** `Data/Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
 - **Live URL:** `https://unit-turns-dashboard-mbt5kfbyktdvpuebrcxtss.streamlit.app/`
@@ -40,7 +40,7 @@ Claude Test/
 2. **Portfolio Overview** — Property x Year cost/volume matrices, Property x Floor Plan table, budget category trends (Core Labor, Core Materials, Other avg per turn)
 3. **Property Summary** — Single-property deep dive: volume, floor plans, category expenses (Core Labor/Materials/Other avg per turn), last 5 turns with floor plan comparison
 4. **Unit Search** — Unit-level: turn history, work history table with export (Excel/PDF), projected scope with comp columns and export (Excel/PDF)
-5. **Rent Roll** — Portfolio Renovated vs Classic summary (% columns), floor plan summary (avg reno/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Move-In, Status (green/red), Total Spend, Last Full Turn, FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
+5. **Rent Roll** — Portfolio Renovated / Partial / Classic summary (% columns), floor plan summary (avg reno/classic rent, premium), property-level rent roll with Loss to Lease, % Upside, Move-In, Status (green/amber/red), Last Full Turn, FT Budget (trailing 3-yr avg per floor plan), ROI %, KPIs, high-frequency turn outliers (5+ turns since 2019)
 6. **Data Health** — File timestamp monitoring with 90-day freshness threshold (green/red/missing signals)
 7. **AI Data Review** — Multi-provider LLM Q&A (Claude, GPT, Gemini) with expanded portfolio data context
 
@@ -93,7 +93,8 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - **17 Budget Categories:** Core Labor (7), Core Materials (4), Other (6)
 - **Cost Types:** Materials, Labor, Mixed, Fee
 - **16 Properties:** Monterey Park, Woodman, Collins, Lindley, El Rancho, 51 at the Village, Alta Vista, Roscoe, Topanga, Darby, Fruitland, Dickens, Garfield, Woodbridge, 12756 Moorpark, 12800 Moorpark
-- **Classic unit:** A unit on the rent roll with no Full Turn on record in turn data
+- **Renovation Status:** Renovated (has Full Turn), Partial (has Partial Turn but no Full Turn), Classic (no Full or Partial Turn)
+- **Classic unit:** A unit on the rent roll with no Full Turn or Partial Turn on record in turn data
 
 ## Key Functions (Rent Roll Tab)
 
@@ -103,8 +104,10 @@ All mapping is handled by `rr_to_turn_key()` (rent roll side) and `_norm_unit()`
 - `rr_to_turn_key(prop_name, rr_unit_str)` — maps a rent roll unit to the compound key used in turn data
 - `_bdba_to_fp(bdba)` — converts rent roll BD/BA (e.g. "2/1.00") to turn data Floor Plan format (e.g. "2x1")
 - `get_ft_units(prop_name, _df_all)` — returns set of compound keys for units with at least one Full Turn
+- `get_pt_units(prop_name, _df_all)` — returns set of compound keys for units with at least one Partial Turn
 - `get_avg_ft_cost(prop_name, _df_all)` — returns average Full Turn cost for a property (all-time)
 - `get_ft_cost_by_fp(prop_name, _df_all)` — returns dict of Floor Plan → trailing 3-year avg FT cost
+- `get_unit_last_ft(prop_name, _df_all)` — returns dict of compound key → (year, cost) for most recent Full Turn
 
 ## Coding Standards
 
