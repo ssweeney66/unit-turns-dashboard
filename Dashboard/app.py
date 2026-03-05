@@ -2353,6 +2353,23 @@ elif view == "5 — Rent Roll":
         latest = per_turn.loc[idx]
         return {r["_key"]: (r["Move-Out Date"].year, r["Invoice Amount"]) for _, r in latest.iterrows()}
 
+    @st.cache_data
+    def get_unit_last_pt(prop_name, _df_all):
+        """Return dict of compound_key -> (year, cost) for the most recent Partial Turn."""
+        pt = _df_all[(_df_all["Property Name"] == prop_name) & (_df_all["Turn Type"] == "Partial Turn")].copy()
+        if pt.empty:
+            return {}
+        pt["_bldg"] = pt["Building Code"].fillna("").astype(str).str.strip()
+        pt["_unit"] = pt["Unit Number"].astype(str).str.strip().apply(_norm_unit)
+        pt["_key"] = pt.apply(
+            lambda r: f"{r['_bldg']}|{r['_unit']}" if r["_bldg"] else r["_unit"], axis=1
+        )
+        pt["Move-Out Date"] = pd.to_datetime(pt["Move-Out Date"], errors="coerce")
+        per_turn = pt.groupby(["_key", "Move-Out Date"])["Invoice Amount"].sum().reset_index()
+        idx = per_turn.groupby("_key")["Move-Out Date"].idxmax()
+        latest = per_turn.loc[idx]
+        return {r["_key"]: (r["Move-Out Date"].year, r["Invoice Amount"]) for _, r in latest.iterrows()}
+
     # ── Portfolio Summary — Renovation Status ──
     section("Portfolio Summary — Renovation Status")
     st.caption("Renovated = Full Turn on record  •  Partial = Partial Turn only  •  Classic = no Full or Partial Turn")
@@ -2373,29 +2390,26 @@ elif view == "5 — Rent Roll":
             n_ft = len(rr_mapped & _ft_keys)
             n_pt = len((rr_mapped & _pt_keys) - _ft_keys)
             n_classic = n_units - n_ft - n_pt
-            ren_pct = f"{n_ft / n_units * 100:.1f}%" if n_units else "—"
-            partial_pct = f"{n_pt / n_units * 100:.1f}%" if n_units else "—"
-            classic_pct = f"{n_classic / n_units * 100:.1f}%" if n_units else "—"
             summary_rows.append({
                 "Property": prop,
                 "Units": n_units,
                 "Renovated": n_ft,
                 "Partial": n_pt,
                 "Classic": n_classic,
-                "% Renovated": ren_pct,
-                "% Partial": partial_pct,
-                "% Classic": classic_pct,
+                "% Renovated": round(n_ft / n_units * 100, 1) if n_units else None,
+                "% Partial": round(n_pt / n_units * 100, 1) if n_units else None,
+                "% Classic": round(n_classic / n_units * 100, 1) if n_units else None,
             })
         else:
             summary_rows.append({
                 "Property": prop,
-                "Units": "—",
-                "Renovated": "—",
-                "Partial": "—",
-                "Classic": "—",
-                "% Renovated": "—",
-                "% Partial": "—",
-                "% Classic": "—",
+                "Units": None,
+                "Renovated": None,
+                "Partial": None,
+                "Classic": None,
+                "% Renovated": None,
+                "% Partial": None,
+                "% Classic": None,
             })
 
     summary_df = pd.DataFrame(summary_rows)
@@ -2405,8 +2419,15 @@ elif view == "5 — Rent Roll":
             return ["background-color: #f0f4f8"] * len(col)
         return [""] * len(col)
 
+    summary_pct_config = {
+        "% Renovated": st.column_config.NumberColumn(format="%.1f%%"),
+        "% Partial": st.column_config.NumberColumn(format="%.1f%%"),
+        "% Classic": st.column_config.NumberColumn(format="%.1f%%"),
+    }
+
     st.dataframe(
         summary_df.style.apply(_highlight_pct_cols),
+        column_config=summary_pct_config,
         use_container_width=True, hide_index=True,
     )
 
@@ -2425,6 +2446,7 @@ elif view == "5 — Rent Roll":
         avg_ft_cost = get_avg_ft_cost(prop_choice, _df_all)
         fp_cost_map = get_ft_cost_by_fp(prop_choice, _df_all)
         last_ft_map = get_unit_last_ft(prop_choice, _df_all)
+        last_pt_map = get_unit_last_pt(prop_choice, _df_all)
 
         # ── KPIs ──
         total_units = len(rr)
@@ -2455,17 +2477,14 @@ elif view == "5 — Rent Roll":
             fp_ren = fp_mapped & ft_keys
             fp_pt = (fp_mapped & pt_keys) - ft_keys
             fp_classic = fp_mapped - ft_keys - pt_keys
-            # Get rents for each status bucket
+            # Get rents for Renovated and Classic only (Partial excluded from averages)
             unit_keys = grp["Unit"].astype(str).str.strip()
             mapped_keys = unit_keys.apply(lambda u: rr_to_turn_key(prop_choice, u))
             ren_mask = mapped_keys.apply(lambda k: k in ft_keys)
-            pt_mask = mapped_keys.apply(lambda k: k in pt_keys and k not in ft_keys)
-            cls_mask = ~ren_mask & ~pt_mask
+            cls_mask = mapped_keys.apply(lambda k: k not in ft_keys and k not in pt_keys)
             ren_rents = grp.loc[ren_mask, "Rent"]
-            pt_rents = grp.loc[pt_mask, "Rent"]
             cls_rents = grp.loc[cls_mask, "Rent"]
             avg_ren = ren_rents.mean() if len(ren_rents) else 0
-            avg_pt = pt_rents.mean() if len(pt_rents) else 0
             avg_cls = cls_rents.mean() if len(cls_rents) else 0
             premium = ((avg_ren - avg_cls) / avg_cls * 100) if avg_cls > 0 and avg_ren > 0 else 0
             fp_rows.append({
@@ -2474,19 +2493,24 @@ elif view == "5 — Rent Roll":
                 "Renovated": len(fp_ren),
                 "Partial": len(fp_pt),
                 "Classic": len(fp_classic),
-                "Avg Renovated Rent": fmt(avg_ren) if avg_ren > 0 else "—",
-                "Avg Partial Rent": fmt(avg_pt) if avg_pt > 0 else "—",
-                "Avg Classic Rent": fmt(avg_cls) if avg_cls > 0 else "—",
-                "% Premium": f"{premium:.1f}%" if premium != 0 else "—",
+                "Avg Renovated Rent": round(avg_ren) if avg_ren > 0 else None,
+                "Avg Classic Rent": round(avg_cls) if avg_cls > 0 else None,
+                "% Premium": round(premium, 1) if premium != 0 else None,
             })
         fp_df = pd.DataFrame(fp_rows)
 
         def _highlight_premium(col):
-            if col.name in ("Avg Renovated Rent", "Avg Partial Rent", "Avg Classic Rent", "% Premium"):
+            if col.name in ("Avg Renovated Rent", "Avg Classic Rent", "% Premium"):
                 return ["background-color: #f0f4f8"] * len(col)
             return [""] * len(col)
 
-        st.dataframe(fp_df.style.apply(_highlight_premium), use_container_width=True, hide_index=True)
+        fp_col_config = {
+            "Avg Renovated Rent": st.column_config.NumberColumn(format="$%,.0f"),
+            "Avg Classic Rent": st.column_config.NumberColumn(format="$%,.0f"),
+            "% Premium": st.column_config.NumberColumn(format="%.1f%%"),
+        }
+
+        st.dataframe(fp_df.style.apply(_highlight_premium), column_config=fp_col_config, use_container_width=True, hide_index=True)
 
         # ── Unit Detail — Renovation Analysis ──
         section(f"Rent Roll — {prop_choice}")
@@ -2510,28 +2534,45 @@ elif view == "5 — Rent Roll":
             roi = (annual_lift / unit_budget * 100) if unit_budget > 0 and not is_renovated and unit_ltl > 0 else 0
 
             move_in = row["Move-in"]
-            move_in_str = move_in.strftime("%b %d, %Y") if pd.notna(move_in) else "—"
+            move_in_str = move_in.strftime("%Y-%m-%d") if pd.notna(move_in) else None
 
-            # Last Full Turn lookup
-            last_ft = last_ft_map.get(mapped_key, None)
-            last_ft_str = f"{last_ft[0]} — {fmt(last_ft[1])}" if last_ft else "—"
+            # Last Major Turn lookup — FT for Renovated, PT for Partial, None for Classic
+            if is_renovated:
+                last_turn = last_ft_map.get(mapped_key, None)
+            elif is_partial:
+                last_turn = last_pt_map.get(mapped_key, None)
+            else:
+                last_turn = None
+            last_turn_str = f"{last_turn[0]} — {fmt(last_turn[1])}" if last_turn else None
 
             r = {
                 "Unit": unit_key,
                 "BD/BA": row["BD/BA"],
-                "Market Rent": fmt(mkt) if mkt else "",
-                "Rent": fmt(rent) if rent else "",
-                "Loss to Lease": fmt(unit_ltl) if unit_ltl != 0 else "—",
-                "% Upside": f"{upside:.1f}%" if upside > 0 else "—",
+                "Market Rent": mkt if mkt else None,
+                "Rent": rent if rent else None,
+                "Loss to Lease": unit_ltl if unit_ltl != 0 else None,
+                "% Upside": round(upside, 1) if upside > 0 else None,
                 "Move-In": move_in_str,
                 "Status": status,
-                "Last Full Turn": last_ft_str,
-                "FT Budget": fmt(unit_budget) if not is_renovated else "—",
-                "ROI %": f"{roi:.0f}%" if roi > 0 else "—",
+                "Last Major Turn": last_turn_str,
+                "FT Budget": unit_budget if not is_renovated else None,
+                "ROI %": round(roi) if roi > 0 else None,
             }
             display_rows.append(r)
 
         display_df = pd.DataFrame(display_rows)
+
+        # ── Filters: BD/BA and Status ──
+        f1, f2, _ = st.columns([1, 1, 4])
+        with f1:
+            bd_options = sorted(display_df["BD/BA"].dropna().unique())
+            bd_filter = st.multiselect("BD/BA", bd_options, default=bd_options, key="rr_bd")
+        with f2:
+            status_options = ["Renovated", "Partial", "Classic"]
+            status_filter = st.multiselect("Status", status_options, default=status_options, key="rr_status")
+        filtered_df = display_df[
+            display_df["BD/BA"].isin(bd_filter) & display_df["Status"].isin(status_filter)
+        ]
 
         def _style_status(col):
             if col.name == "Status":
@@ -2541,14 +2582,24 @@ elif view == "5 — Rent Roll":
                     else "background-color: #f8d7da; color: #721c24"
                     for v in col
                 ]
-            if col.name == "Last Full Turn":
+            if col.name == "Last Major Turn":
                 return ["background-color: #fef9f3"] * len(col)
             if col.name in ("FT Budget", "ROI %"):
                 return ["background-color: #f0f4f8"] * len(col)
             return [""] * len(col)
 
+        rr_col_config = {
+            "Market Rent": st.column_config.NumberColumn(format="$%,.0f"),
+            "Rent": st.column_config.NumberColumn(format="$%,.0f"),
+            "Loss to Lease": st.column_config.NumberColumn(format="$%,.0f"),
+            "% Upside": st.column_config.NumberColumn(format="%.1f%%"),
+            "FT Budget": st.column_config.NumberColumn(format="$%,.0f"),
+            "ROI %": st.column_config.NumberColumn(format="%.0f%%"),
+        }
+
         st.dataframe(
-            display_df.style.apply(_style_status),
+            filtered_df.style.apply(_style_status),
+            column_config=rr_col_config,
             use_container_width=True, hide_index=True, height=700,
         )
 
@@ -2564,6 +2615,32 @@ elif view == "5 — Rent Roll":
             f'</div>',
             unsafe_allow_html=True,
         )
+
+        # ── Export Rent Roll (Excel) ──
+        # Build a formatted copy for Excel export
+        rr_export = filtered_df.copy()
+        for c in ("Market Rent", "Rent", "Loss to Lease", "FT Budget"):
+            rr_export[c] = rr_export[c].apply(lambda v: fmt(v) if pd.notna(v) and v else "")
+        rr_export["% Upside"] = rr_export["% Upside"].apply(lambda v: f"{v:.1f}%" if pd.notna(v) else "")
+        rr_export["ROI %"] = rr_export["ROI %"].apply(lambda v: f"{v:.0f}%" if pd.notna(v) else "")
+        rr_export["Move-In"] = rr_export["Move-In"].fillna("")
+        rr_export["Last Major Turn"] = rr_export["Last Major Turn"].fillna("")
+        rr_xl_buf = io.BytesIO()
+        n_filtered = len(filtered_df)
+        with pd.ExcelWriter(rr_xl_buf, engine="openpyxl") as writer:
+            rr_export.to_excel(writer, sheet_name="Rent Roll", index=False, startrow=2)
+            ws = writer.sheets["Rent Roll"]
+            ws.cell(row=1, column=1, value=f"{prop_choice}  |  {n_filtered} units  |  {n_ft} renovated  |  {n_pt} partial  |  {n_classic} classic  |  {pd.Timestamp.now().strftime('%B %d, %Y')}")
+            ws.cell(row=1, column=1).font = Font(bold=True, size=11)
+        rr_xl_buf.seek(0)
+        rr_xl_name = f"{prop_choice}_rent_roll_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx"
+        dl_col, _ = st.columns([1, 5])
+        with dl_col:
+            st.download_button(
+                "📥 Excel", rr_xl_buf, file_name=rr_xl_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="rr_xl",
+            )
 
     st.markdown("---")
 
