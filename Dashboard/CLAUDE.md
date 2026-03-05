@@ -11,10 +11,10 @@
 ## Project Context
 
 - **App:** Full Turn Analytics Dashboard (Streamlit)
-- **File:** `Dashboard/app.py` — single-file dashboard (~2,899 lines)
+- **File:** `Dashboard/app.py` — single-file dashboard (~2,896 lines)
 - **Data:** `Data/Unit Turns - AI Clean - 2.26.2026.xlsx` — 19,257 invoice line items across 14 multifamily properties
 - **Repo:** `ssweeney66/unit-turns-dashboard` (public, main branch)
-- **Live URL:** `https://unit-turns-dashboard-t2yhaxw6dfvmrqixmdxprz.streamlit.app/`
+- **Live URL:** `https://unit-turns-dashboard-mbt5kfbyktdvpuebrcxtss.streamlit.app/`
 - **Auth:** Password gate via `st.secrets["password"]` — set in Streamlit Cloud Settings → Secrets
 - **Stack:** Streamlit 1.54.0, Pandas 2.3.3, Plotly 6.5.2, OpenAI, Anthropic, Google GenAI, fpdf2
 
@@ -23,12 +23,14 @@
 Claude Test/
 ├── Dashboard/          ← app code lives here
 │   ├── app.py
+│   ├── analyze_ft.py   (standalone analysis script)
 │   ├── CLAUDE.md
 │   └── requirements.txt
-└── Data/               ← all data files live here
-    ├── Unit Turns - AI Clean - 2.26.2026.xlsx
-    ├── Rent Rolls/     (16 property rent roll files)
-    └── Vacancy/        (Unit Vacancy.xlsx)
+├── Data/               ← all data files live here
+│   ├── Unit Turns - AI Clean - 2.26.2026.xlsx
+│   ├── Rent Rolls/     (16 property rent roll files)
+│   └── Vacancy/        (Unit Vacancy.xlsx)
+└── requirements.txt    ← root copy for Streamlit Cloud
 ```
 - All data paths in app.py use `Path(__file__).parent.parent / "Data" / ...` to reach the sibling Data folder
 

@@ -711,10 +711,6 @@ _all_props = set(ft_turns["Property Name"].unique())
 PROPERTIES = [p for p in PROPERTY_ORDER if p in _all_props] + sorted(_all_props - set(PROPERTY_ORDER))
 _PROP_RANK = {name: i for i, name in enumerate(PROPERTIES)}
 
-def prop_sort_key(names):
-    """Return sort keys for a Series/Index of property names using PROPERTY_ORDER."""
-    return names.map(lambda n: _PROP_RANK.get(n, 999))
-
 
 @st.cache_data
 def build_turn_summary(source_df):
@@ -1036,7 +1032,6 @@ elif view == "2 — Portfolio Overview":
             spread = top_avg - low_avg
             # Count properties above/below avg
             above_avg = len(prop_only[prop_only["Avg (5-Yr)"] > port_avg])
-            below_avg = len(prop_only[prop_only["Avg (5-Yr)"] <= port_avg])
             # Properties with YoY increase
             yoy_col = "2024 → 2025"
             rising = prop_only[(prop_only[yoy_col].notna()) & (prop_only[yoy_col] > 0)]
